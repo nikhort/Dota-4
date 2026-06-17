@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head> 
+    <meta charset="UTF-8">
+    <title>2D MOBA Game Arena</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>  
+    <div id="hero-selection" class="screen">
+        <h1 class="title">CHOOSE YOUR HERO</h1>
+        <div class="hero-container">
+            <div class="hero-card" data-hero="Morphling">
+                <div class="hero-avatar morphling"></div>
+                <h2>Morphling</h2>
+                <p>Agile ranged fighter. Waveform deals area damage while dashing forward.</p>
+            </div>
+            <div class="hero-card" data-hero="Warlock">
+                <div class="hero-avatar warlock"></div>
+                <h2>Warlock</h2>
+                <p>Support mage. Shadow Word heals allies or damages enemies over time.</p>
+            </div>
+            <div class="hero-card" data-hero="Sniper">
+                <div class="hero-avatar sniper"></div>
+                <h2>Sniper</h2>
+                <p>Long-range marksman. Uses Shrapnel, powerful Headshots, and a targeted ultimate.</p>
+            </div> 
+        </div>
+    </div>
+
+    <div id="game-screen" class="screen hidden">
+        <canvas id="gameCanvas"></canvas>
+
+        <div id="top-bar">
+            <div class="throne-hp radiant">Radiant Throne: <span id="radiant-throne-hp">100%</span></div>
+            <div id="match-timer">00:00</div>
+            <div class="throne-hp dire">Dire Throne: <span id="dire-throne-hp">100%</span></div>
+        </div>
+
+        <div id="hud-container">
+            <div class="hud-left">
+                <div id="hero-level-container">
+                    <span class="label">LVL</span>
+                    <div id="hero-level-badge">1</div>
+                </div>
+                <div class="stats-panel">
+                    <div class="stat-row">⚔️ Damage: <span id="stat-damage">0</span></div>
+                    <div class="stat-row">🥾 Speed: <span id="stat-speed">0</span></div>
+                    <div class="stat-row">🎯 Range: <span id="stat-range">0</span></div>
+                </div>
+                <div class="hero-profile-holder">
+                    <img id="hero-profile-icon" class="hero-profile-icon hidden" src="" alt="Hero profile icon">
+                </div>
+            </div>
+
+            <div class="hud-center">
+                <div id="xp-container" class="bar-container">
+                    <div id="xp-bar" class="bar-fill"></div>
+                    <div id="xp-text" class="bar-text">0/100 XP</div>
+                </div>
+
+                <div id="hp-container" class="bar-container">
+                    <div id="hp-indicator" class="bar-fill hp"></div>
+                    <div class="bar-content-wrapper">
+                        <div id="hp-text" class="bar-text centered">600/600</div>
+                        <div id="hp-regen-text" class="bar-regen right">+2.0</div>
+                    </div>
+                </div>
+
+                <div id="mp-container" class="bar-container">
+                    <div id="mp-indicator" class="bar-fill mp"></div>
+                    <div class="bar-content-wrapper">
+                        <div id="mp-text" class="bar-text centered">260/260</div>
+                        <div id="mp-regen-text" class="bar-regen right">+1.5</div>
+                    </div>
+                </div>
+
+                <div id="abilities-panel">
+                    <div class="ability-slot" id="ability-0">
+                        <span class="ability-hotkey">Q</span>
+                        <div class="ability-name">Ability 1</div>
+                        <div class="cooldown-overlay" id="cooldown-0">0</div>
+                        <div class="tooltip" id="tooltip-0"></div>
+                    </div>
+                    <div class="ability-slot" id="ability-1">
+                        <span class="ability-hotkey">W</span>
+                        <div class="ability-name">Ability 2</div>
+                        <div class="cooldown-overlay" id="cooldown-1">0</div>
+                        <div class="tooltip" id="tooltip-1"></div>
+                    </div>
+                    <div class="ability-slot" id="ability-2">
+                        <span class="ability-hotkey">E</span>
+                        <div class="ability-name">Ability 3</div>
+                        <div class="cooldown-overlay" id="cooldown-2">0</div>
+                        <div class="tooltip" id="tooltip-2"></div>
+                    </div>
+                    <div class="ability-slot" id="ability-3">
+                        <span class="ability-hotkey">R</span>
+                        <div class="ability-name">Ability 4</div>
+                        <div class="cooldown-overlay" id="cooldown-3">0</div>
+                        <div class="tooltip" id="tooltip-3"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="hud-right">
+                <div class="gold-and-inventory">
+                    <div id="gold-container">💰 Gold: <span id="gold-value">600</span></div>
+                    <div id="glyph-container" style="position: relative; display: inline-block; margin-bottom: 6px;">
+                        <button id="glyph-btn" style="
+                            background: #1a365d;
+                            border: 2px solid #3182ce;
+                            color: #fff;
+                            border-radius: 50%;
+                            width: 40px;
+                            height: 40px;
+                            cursor: pointer;
+                            font-weight: bold;
+                            font-size: 16px;
+                            box-shadow: 0 0 10px rgba(49, 130, 206, 0.5);
+                            transition: all 0.2s;
+                        " title="Activate Glyph (Building Defense)">🛡️</button>
+                        <div id="glyph-cooldown" style="
+                            position: absolute;
+                            top: 0; 
+                            left: 0;
+                            width: 40px;          /* Явно задаем ширину как у кнопки */
+                            height: 40px;         /* Явно задаем высоту как у кнопки */
+                            box-sizing: border-box; /* Защищает от деформации из-за рамок */
+                            background: rgba(0,0,0,0.7);
+                            border-radius: 50%;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            font-size: 12px;
+                            font-weight: bold;
+                            color: #fff;
+                            visibility: hidden;
+                            pointer-events: none; /* Чтобы клики проходили сквозь таймер на кнопку */
+                        ">60</div>
+                    </div>
+                    <button id="open-shop-btn">🏪 Shop (P)</button>
+                    <div id="inventory-grid">
+                        <div class="inventory-slot" data-slot="0"></div>
+                        <div class="inventory-slot" data-slot="1"></div>
+                        <div class="inventory-slot" data-slot="2"></div>
+                        <div class="inventory-slot" data-slot="3"></div>
+                        <div class="inventory-slot" data-slot="4"></div>
+                        <div class="inventory-slot" data-slot="5"></div>
+                    </div>
+                </div>
+                <div id="minimap-container">
+                    <canvas id="minimapCanvas" width="150" height="150"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div id="shop-modal" class="hidden">
+            <div class="shop-content">
+                <div class="shop-header">
+                    <h2>Hidden Item Shop</h2>
+                    <button id="close-shop-btn">❌ Close</button>
+                </div>
+                <div class="shop-items-list">
+                    <div class="shop-item" data-item="boots">
+                        <img class="shop-item-icon" src="images/Boots_of_speed_icon.webp" alt="Boots of Speed">
+                        <div class="shop-item-info">
+                            <h3>🥾 Boots of Speed</h3>
+                            <p>Price: 500 🪙</p>
+                            <p>Bonus: +20% movement speed</p>
+                        </div>
+                    </div>
+                    <div class="shop-item" data-item="sword">
+                        <img class="shop-item-icon" src="images/Crystalys_icon.webp" alt="Crystal Sword">
+                        <div class="shop-item-info">
+                            <h3>⚔️ Crystal Sword</h3>
+                            <p>Price: 1000 🪙</p>
+                            <p>Bonus: +25 attack damage</p>
+                        </div>
+                    </div>
+                    <div class="shop-item" data-item="orb">
+                        <img class="shop-item-icon" src="images/Vitality_booster_icon.webp" alt="Vitality Booster">
+                        <div class="shop-item-info">
+                            <h3>🧪 Vitality Booster</h3>
+                            <p>Price: 1200 🪙</p>
+                            <p>Bonus: +300 max health</p>
+                        </div>
+                    </div>
+                    <div class="shop-item" data-item="vladmir">
+                        <img class="shop-item-icon" src="images/vladimirs_offering.png" alt="Vladmir's Offering">
+                        <div class="shop-item-info">
+                            <h3>🩸 Vladmir's Offering</h3>
+                            <p>Price: 2200 🪙</p>
+                            <p>Passive: Vladmir's Aura</p>
+                            <p>Radius: 1200</p>
+                            <p>+20% lifesteal</p>
+                            <p>+18% attack damage</p>
+                            <p>+2 armor to allies</p>
+                            <p>+1 mana regen to allies</p>
+                            <p>Owner: +0.75 mana regen, +1 armor</p>
+                        </div>
+                    </div>
+                    <div class="shop-item" data-item="linkens">
+                        <img class="shop-item-icon" src="images/sphere.png" alt="Linken's Sphere">
+                        <div class="shop-item-info">
+                            <h3>🔮 Linken's Sphere</h3>
+                            <p>Price: 4800 🪙</p>
+                            <p>+200 health</p>
+                            <p>+200 mana</p>
+                            <p>+15 damage</p>
+                            <p>+5 mana regen</p>
+                            <p>Passive: Spellblock — blocks the first targeted spell. Cooldown: 14 sec.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="end-screen" class="screen hidden">
+        <h1 id="end-title">VICTORY</h1>
+        <button onclick="location.reload()" class="restart-btn">PLAY AGAIN</button>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>

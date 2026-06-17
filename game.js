@@ -1,0 +1,2197 @@
+// game.js
+// --- СИСТЕМА СИНТЕЗА АУДИО (БЕЗ ФАЙЛОВ) ---
+class AudioManager {
+    constructor() { this.ctx = null; } 
+    init() { if (!this.ctx) { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } }
+    play(type) {
+        this.init();
+        if (!this.ctx || this.ctx.state === 'suspended') return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.connect(gain); gain.connect(this.ctx.destination);
+        const now = this.ctx.currentTime;
+
+        if (type === 'attack') {
+            osc.type = 'triangle'; osc.frequency.setValueAtTime(320, now);
+            osc.frequency.exponentialRampToValueAtTime(60, now + 0.1);
+            gain.gain.setValueAtTime(0.1, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+            osc.start(now); osc.stop(now + 0.1);
+        } else if (type === 'buy') {
+            osc.type = 'sine'; osc.frequency.setValueAtTime(520, now);
+            osc.frequency.setValueAtTime(780, now + 0.08);
+            gain.gain.setValueAtTime(0.15, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+            osc.start(now); osc.stop(now + 0.2);
+        } else if (type === 'creep_death') {
+            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(120, now);
+            osc.frequency.linearRampToValueAtTime(30, now + 0.1);
+            gain.gain.setValueAtTime(0.08, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+            osc.start(now); osc.stop(now + 0.1);
+        } else if (type === 'tower_break') {
+            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(80, now);
+            osc.frequency.linearRampToValueAtTime(20, now + 0.5);
+            gain.gain.setValueAtTime(0.3, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+            osc.start(now); osc.stop(now + 0.5);
+        } else if (type === 'ability') {
+            osc.type = 'sine'; osc.frequency.setValueAtTime(220, now);
+            osc.frequency.exponentialRampToValueAtTime(880, now + 0.25);
+            gain.gain.setValueAtTime(0.15, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+            osc.start(now); osc.stop(now + 0.25);
+        } else if (type === 'victory') {
+            osc.type = 'sine'; osc.frequency.setValueAtTime(523, now);
+            osc.frequency.setValueAtTime(659, now + 0.15); osc.frequency.setValueAtTime(783, now + 0.3);
+            gain.gain.setValueAtTime(0.2, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+            osc.start(now); osc.stop(now + 0.6);
+        } else if (type === 'defeat') {
+            osc.type = 'sawtooth'; osc.frequency.setValueAtTime(180, now);
+            osc.frequency.setValueAtTime(130, now + 0.2);
+            gain.gain.setValueAtTime(0.2, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+            osc.start(now); osc.stop(now + 0.6);
+        }
+    }
+}
+
+// --- НАСТРОЙКА КАНВАСА И ОКРУЖЕНИЯ ---
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const audio = new AudioManager();
+
+function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+window.addEventListener('contextmenu', e => e.preventDefault());
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+class GameMap {
+    constructor() {
+        this.width = 3200;
+        this.height = Math.max(900, window.innerHeight);
+        this.laneY = this.height / 2;
+
+        this.treeImg = new Image();
+        this.treeImg.src = 'images/tree.png';
+
+        this.decorations = [];
+        this.generateDecorations();
+    }
+    generateDecorations() {
+        const margin = 120;
+        const topCount = 8;
+        const bottomCount = 7;
+        const minDistance = 180;
+
+        const hasOverlap = (x, y) => {
+            return this.decorations.some(deco => {
+                const dx = deco.x - x;
+                const dy = deco.y - y;
+                return Math.hypot(dx, dy) < minDistance;
+            });
+        };
+
+        const placeTree = (xRange, yRange, sizeRange) => {
+            for (let attempt = 0; attempt < 60; attempt++) {
+                const x = xRange();
+                const y = yRange();
+                if (!hasOverlap(x, y)) {
+                    const size = sizeRange();
+                    this.decorations.push({ x, y, type: 'tree', size });
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        for (let i = 0; i < topCount; i++) {
+            placeTree(
+                () => margin + Math.random() * (this.width - margin * 2),
+                () => margin + Math.random() * (this.laneY - margin * 2 - 160),
+                () => 150 + Math.random() * 40
+            );
+        }
+
+        for (let i = 0; i < bottomCount; i++) {
+            placeTree(
+                () => margin + Math.random() * (this.width - margin * 2),
+                () => this.laneY + 160 + Math.random() * (this.height - this.laneY - margin * 2 - 120),
+                () => 130 + Math.random() * 50
+            );
+        }
+    }
+    drawDecoration(ctx, deco, camera) {
+        const img = this.treeImg;
+        const size = deco.size || 160;
+        const sx = deco.x - camera.x - size / 2;
+        const sy = deco.y - camera.y - size;
+
+        if (img && img.complete && img.naturalWidth) {
+            ctx.drawImage(img, sx, sy, size, size);
+        } else {
+            ctx.save();
+            ctx.fillStyle = '#2b6b2f';
+            ctx.beginPath();
+            ctx.ellipse(deco.x - camera.x, deco.y - camera.y - size * 0.2, size * 0.5, size * 0.75, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#6d3f1e';
+            ctx.fillRect(deco.x - camera.x - size * 0.05, deco.y - camera.y - size * 0.16, size * 0.1, size * 0.25);
+            ctx.restore();
+        }
+    }
+    draw(ctx, camera) {
+        ctx.fillStyle = '#1e2d1a';
+        ctx.fillRect(-camera.x, -camera.y, this.width, this.height);
+        ctx.fillStyle = '#2d241d';
+        ctx.fillRect(-camera.x, this.laneY - 80 - camera.y, this.width, 160);
+
+        for (let deco of this.decorations) {
+            this.drawDecoration(ctx, deco, camera);
+        }
+    }
+}
+
+class Camera {
+    constructor(map) { this.x = 0; this.y = 0; this.map = map; }
+    update(tx, ty) {
+        this.x = tx - canvas.width / 2;
+        this.y = ty - canvas.height / 2;
+        if (this.x < 0) this.x = 0; if (this.y < 0) this.y = 0;
+        if (this.x > this.map.width - canvas.width) this.x = this.map.width - canvas.width;
+        if (this.y > this.map.height - canvas.height) this.y = this.map.height - canvas.height;
+    }
+}
+
+// --- СПОСОБНОСТИ И ИНВЕНТАРЬ ---
+class Ability {
+    constructor(name, type, cooldown, cost, desc = "") {
+        this.name = name; this.type = type; this.maxCooldown = cooldown;
+        this.currentCooldown = 0; this.manaCost = cost; this.description = desc;
+    }
+    update(dt) {
+        if (this.currentCooldown > 0) {
+            this.currentCooldown -= dt;
+            if (this.currentCooldown < 0) this.currentCooldown = 0;
+        }
+    }
+    trigger(caster) {
+        if (this.type === 'passive' || this.currentCooldown > 0 || caster.mp < this.manaCost) return false;
+        caster.mp -= this.manaCost;
+        this.currentCooldown = this.maxCooldown;
+        audio.play('ability'); 
+        return true;
+    }
+}
+
+class Item {
+    constructor(id, name, cost, stats) { this.id = id; this.name = name; this.cost = cost; this.stats = stats; }
+}
+
+class Inventory {
+    constructor(owner) { this.owner = owner; this.slots = new Array(6).fill(null); }
+    addItem(item) {
+        for (let i = 0; i < 6; i++) {
+            if (this.slots[i] === null) {
+                this.slots[i] = item;
+                if (item.stats.speedBonus) this.owner.speed *= (1 + item.stats.speedBonus);
+                if (item.stats.damageBonus) this.owner.damage += item.stats.damageBonus;
+                if (item.stats.damage) this.owner.damage += item.stats.damage;
+                if (item.stats.hpBonus) { this.owner.maxHp += item.stats.hpBonus; this.owner.hp += item.stats.hpBonus; }
+                if (item.stats.hp) { this.owner.maxHp += item.stats.hp; this.owner.hp += item.stats.hp; }
+                if (item.stats.mana) { this.owner.maxMp += item.stats.mana; this.owner.mp += item.stats.mana; }
+                if (item.stats.manaRegen) this.owner.inventoryManaRegen = (this.owner.inventoryManaRegen || 0) + item.stats.manaRegen;
+                if (item.stats.manaRegenBonus) this.owner.inventoryManaRegen = (this.owner.inventoryManaRegen || 0) + item.stats.manaRegenBonus;
+                if (item.stats.armorBonus) this.owner.armor = (this.owner.armor || 0) + item.stats.armorBonus;
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+// --- БАЗОВЫЕ ИГРОВЫЕ ОБЪЕКТЫ ---
+class Entity {
+    constructor(x, y, team, radius, hp, damage, speed) {
+        this.x = x; this.y = y; this.team = team; this.radius = radius;
+        this.maxHp = hp; this.hp = hp; this.damage = damage; this.speed = speed;
+        this.targetX = x; this.targetY = y; this.baseSpeed = speed;
+        this.attackTarget = null; this.attackCooldown = 0; this.attackSpeed = 1.2;
+        this.attackRange = 100; this.isDead = false; this.facing = 1; this.slowTimer = 0;
+        this.headshotSlowTimer = 0;
+        this.hitEffectTimer = 0;
+    }
+    takeDamage(amount, attacker) {
+        if (this.isDead) return;
+        this.hp -= amount;
+        game.uiManager.addFloatingText(this.x, this.y - 20, Math.floor(amount), '#ff4400');
+        if (this.hp <= 0) { this.hp = 0; this.isDead = true; this.onDeath(attacker); }
+    }
+    onDeath(attacker) {}
+    moveTo(x, y) { this.targetX = x; this.targetY = y; }
+    setMoveTarget(x, y) { this.moveTo(x, y); }
+    
+    updateMovement(dt) {
+        if (this.headshotSlowTimer > 0) this.headshotSlowTimer -= dt;
+        if (this.hitEffectTimer > 0) this.hitEffectTimer -= dt;
+
+        let currentSlow = 1.0;
+        if (this.slowTimer > 0) { this.slowTimer -= dt; currentSlow *= 0.5; }
+        if (this.headshotSlowTimer > 0) currentSlow *= 0.6; 
+
+        if (window.game && game.shrapnelZones) {
+            for (let zone of game.shrapnelZones) {
+                if (zone.team !== this.team && Math.hypot(this.x - zone.x, this.y - zone.y) <= zone.radius) {
+                    if (!(this instanceof Tower) && !(this instanceof Ancient)) {
+                        currentSlow *= 0.75;
+                    }
+                }
+            }
+        }
+
+        if (this instanceof Sniper && this.aimTimer > 0) {
+            currentSlow *= 0.35; 
+        }
+
+        let globalSpeed = window.game ? game.globalSpeedMultiplier : 0.8;
+        this.speed = this.baseSpeed * currentSlow * globalSpeed;
+
+        if (this.attackTarget) { this.targetX = this.attackTarget.x; this.targetY = this.attackTarget.y; }
+
+        let dx = this.targetX - this.x;
+        let dy = this.targetY - this.y;
+        let dist = Math.hypot(dx, dy);
+        
+        let stopRange = this.attackTarget ? this.attackRange * 0.85 : 2;
+
+        if (dist > stopRange) {
+            this.facing = dx >= 0 ? 1 : -1;
+            let step = this.speed * dt;
+            
+            if (step >= (dist - stopRange)) {
+                if (!this.attackTarget) {
+                    this.x = this.targetX; this.y = this.targetY;
+                } else {
+                    this.x += (dx / dist) * (dist - stopRange);
+                    this.y += (dy / dist) * (dist - stopRange);
+                }
+            } else {
+                this.x += (dx / dist) * step;
+                this.y += (dy / dist) * step;
+            }
+        } else if (!this.attackTarget) {
+            this.targetX = this.x; this.targetY = this.y;
+        }
+    }
+    drawHealthBar(ctx, camera) {
+        let sx = this.x - camera.x; let sy = this.y - camera.y - this.radius - 10;
+        let w = this.radius * 2.4; let h = 5;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(sx - w/2, sy, w, h);
+        ctx.fillStyle = this.team === 'radiant' ? '#33ff33' : '#ff3333';
+        ctx.fillRect(sx - w/2, sy, (this.hp / this.maxHp) * w, h);
+    }
+    drawShadow(ctx, camera) {
+        let sx = this.x - camera.x; let sy = this.y - camera.y + this.radius - 2;
+        ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath();
+        ctx.ellipse(sx, sy, this.radius * 1.1, this.radius * 0.35, 0, 0, Math.PI * 2);
+        ctx.fill(); ctx.restore();
+    }
+}
+
+// --- КЛАССЫ ГЕРОЕВ ---
+class Hero extends Entity {
+    constructor(x, y, team, name) {
+        super(x, y, team, 22, 600, 54, 295);
+        this.name = name; this.level = 1; this.xp = 0; this.maxXp = 100;
+        this.mp = 300; this.maxMp = 300; this.gold = 100;
+        this.inventory = new Inventory(this); this.abilities = [];
+        this.hpRegenBase = 2.0; this.mpRegenBase = 1.5; this.invulnerable = false;
+    }
+    getHpRegen() { return this.hpRegenBase; }
+    getMpRegen() {
+        return this.mpRegenBase + (this.mpRegenAura || 0) + (this.inventoryManaRegen || 0);
+    }
+    onDeath(attacker) {
+        audio.play('defeat');
+
+        // Награда за убийство героя
+        if (attacker instanceof Hero) {
+            attacker.gold += 200;
+
+            if (attacker === game.playerHero) {
+                game.uiManager.addFloatingText(
+                    this.x,
+                    this.y - 30,
+                    "+200 🪙 HERO KILL",
+                    "#ffd700"
+                );
+            }
+        }
+
+        setTimeout(() => {
+            this.isDead = false; this.hp = this.maxHp; this.mp = this.maxMp;
+                this.x = this.team === 'radiant' ? 160 : 3040; this.y = game.map.laneY;
+            this.targetX = this.x; this.targetY = this.y; this.attackTarget = null;
+            if (this instanceof Sniper) {
+                this.shrapnelCharges = 2;
+                this.shrapnelChargeRegenTimer = 0;
+                this.aimTimer = 0;
+                this.assChannel = 0;
+                this.assTarget = null;
+            }
+        }, 5000);
+    }
+    addXp(amount) {
+        if (this.level >= 10) return;
+        this.xp += amount;
+        if (this.xp >= this.maxXp) {
+            this.xp -= this.maxXp; this.level++; this.maxXp = 100 + this.level * 50;
+            this.maxHp += 80; this.hp += 80;
+            this.maxMp += 40; this.mp += 40;
+            this.damage += 5;
+
+            // Регенерация при повышении уровня
+            if (this.hpRegenBase === undefined) this.hpRegenBase = 2.0;
+            if (this.mpRegenBase === undefined) this.mpRegenBase = 1.5;
+            this.hpRegenBase += 0.5;
+            this.mpRegenBase += 0.25;
+
+            game.uiManager.addFloatingText(this.x, this.y - 35, "LEVEL UP", '#ffd700');
+        }
+    }
+    update(dt) {
+        if (this.isDead) return;
+        if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.getHpRegen() * dt);
+        if (this.mp < this.maxMp) this.mp = Math.min(this.maxMp, this.mp + this.getMpRegen() * dt);
+        this.updateMovement(dt);
+        
+        let rate = 1.0;
+        if (this.headshotSlowTimer > 0) rate = 0.5;
+        if (this.attackCooldown > 0) this.attackCooldown -= dt * rate;
+
+        if (this.attackTarget) {
+            if (this.attackTarget.isDead) { this.attackTarget = null; return; }
+            let d = Math.hypot(this.attackTarget.x - this.x, this.attackTarget.y - this.y);
+            if (d <= this.attackRange && this.attackCooldown <= 0) { this.performAttack(); }
+        }
+        for (let ab of this.abilities) ab.update(dt);
+        
+        // Vladmir's Offering aura handling
+        if (this.hasVladmir) {
+            const allies = this.team === 'radiant' ? game.radiantEntities() : game.direEntities();
+            for (let unit of allies) {
+                const dist = Math.hypot(unit.x - this.x, unit.y - this.y);
+                if (dist <= 1200) {
+                    unit.vladmirAura = true;
+                    unit.damageMultiplier = 1.18; // +18% damage
+                    unit.armorBonusAura = 2;
+                    unit.mpRegenAura = 1;
+                } else {
+                    unit.vladmirAura = false;
+                    unit.damageMultiplier = 1;
+                    unit.armorBonusAura = 0;
+                    unit.mpRegenAura = 0;
+                }
+            }
+        }
+        // Linken's Sphere cooldown decrement
+        if (this.hasLinkens && this.linkensCooldown > 0) {
+            this.linkensCooldown = Math.max(0, this.linkensCooldown - dt);
+        }
+    }
+    
+    blockSpell(caster) {
+        if (this.hasLinkens && (!this.linkensCooldown || this.linkensCooldown <= 0)) {
+            this.linkensCooldown = 14.0;
+            if (game && game.effects) game.effects.push({ type: 'linkens', x: this.x, y: this.y, life: 0.6 });
+            audio.play('ability');
+            if (game && game.uiManager) game.uiManager.addFloatingText(this.x, this.y - 30, 'SPELL BLOCKED', '#66ccff');
+            return true;
+        }
+        return false;
+    }
+    performAttack() {
+        this.attackCooldown = this.attackSpeed; audio.play('attack');
+        let finalDamage = this.damage;
+        if (this.vladmirAura) finalDamage *= 1.18;
+        game.projectiles.push(new Projectile(this.x, this.y, this.attackTarget, finalDamage, this.team, this));
+    }
+    draw(ctx, camera) {
+        if (this.isDead) return;
+        this.drawShadow(ctx, camera);
+        let sx = this.x - camera.x; let sy = this.y - camera.y;
+        let bob = Math.sin(performance.now() * 0.01) * 2.5;
+
+        ctx.save(); ctx.translate(sx, sy + bob);
+        ctx.fillStyle = this.team === 'radiant' ? '#00bfff' : '#ff1493';
+        ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, Math.PI*2); ctx.fill();
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 10px Arial'; ctx.textAlign = 'center';
+        ctx.fillText(this.name.substring(0, 4).toUpperCase(), 0, 4);
+        ctx.restore();
+
+        if (this.hitEffectTimer > 0) {
+            ctx.save(); ctx.fillStyle = 'rgba(255, 68, 0, 0.6)';
+            ctx.beginPath(); ctx.arc(sx, sy, this.radius * 1.4, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+        }
+        this.drawHealthBar(ctx, camera);
+    }
+}
+
+class Morphling extends Hero {
+    constructor(x, y, team) {
+        super(x, y, team, 'Morphling');
+        this.attackRange = 250; // Базовая дальность атаки
+
+        // Базовые характеристики для Attribute Shift
+        this.baseStrength = 22;
+        this.baseAgility = 24;
+        this.minStatLimit = 5; // Минимальный лимит характеристик
+
+        // Хранение изначальных базовых параметров (чтобы корректно рассчитывать прирост)
+        this.morphBaseHp = this.maxHp;
+        this.morphBaseDamage = this.damage;
+
+        // Ability 1 (index 0): Waveform
+        this.abilities.push(new Ability('Waveform', 'active', 10, 90, 'Dash forward, dealing 150 damage to all enemies in the path.'));
+        this.waveformTimer = 0; this.wdx = 0; this.wdy = 0; this.wHits = [];
+
+        // Ability 2 (index 1): Adaptive Strike (W)
+        this.abilities.push(new Ability('Adaptive Strike', 'active', 12, 100, 'Launches a watery projectile that deals magic damage, stuns, and knocks back the enemy.'));
+
+        // Ability 3 (index 2): Attribute Shift (Agility Gain) (D)
+        this.abilities.push(new Ability('Shift (Agility)', 'active', 0, 0, 'Gradually moves Strength into Agility, increasing attack damage and speed while reducing health.'));
+        this.isShiftingAgility = false;
+
+        // Ability 4 (index 3): Attribute Shift (Strength Gain) (F)
+        this.abilities.push(new Ability('Shift (Strength)', 'active', 0, 0, 'Gradually moves Agility into Strength, increasing health while reducing attack damage.'));
+        this.isShiftingStrength = false;
+
+        // Таймер для постепенного переноса статов (каждые 0.1 секунды)
+        this.shiftTimer = 0;
+    }
+
+    useAbility(idx = 0) {
+        if (this.isDead) return;
+
+        if (idx === 0) {
+            // Существующая Waveform
+            if (this.abilities[0].trigger(this)) {
+                this.invulnerable = true; this.waveformTimer = 0.25; this.wHits = [];
+                let ang = Math.atan2(this.targetY - this.y, this.targetX - this.x);
+                if (this.attackTarget) ang = Math.atan2(this.attackTarget.y - this.y, this.attackTarget.x - this.x);
+                this.wdx = Math.cos(ang) * 1200; this.wdy = Math.sin(ang) * 1200;
+            }
+        } else if (idx === 1) {
+            // Способность W — Adaptive Strike
+            let castRange = this.attackRange + 150; // Дальность применения больше обычной атаки
+            let enemies = this.team === 'radiant' ? game.direEntities() : game.direEntities();
+            let target = this.attackTarget || enemies.find(e => Math.hypot(e.x - this.x, e.y - this.y) <= castRange && !e.isDead);
+
+            if (target && Math.hypot(target.x - this.x, target.y - this.y) <= castRange) {
+                if (target && target.blockSpell && target.blockSpell(this)) return;
+                if (this.abilities[1].trigger(this)) {
+                    game.projectiles.push(new AdaptiveStrikeProjectile(this.x, this.y, target, this.team, this));
+                }
+            }
+        } else if (idx === 2) {
+            // Способность D — Attribute Shift (Agility Gain)
+            this.isShiftingAgility = !this.isShiftingAgility;
+            if (this.isShiftingAgility) {
+                this.isShiftingStrength = false;
+                if (typeof audio !== 'undefined') audio.play('ability');
+            }
+        } else if (idx === 3) {
+            // Способность F — Attribute Shift (Strength Gain)
+            this.isShiftingStrength = !this.isShiftingStrength;
+            if (this.isShiftingStrength) {
+                this.isShiftingAgility = false;
+                if (typeof audio !== 'undefined') audio.play('ability');
+            }
+        }
+    }
+
+    update(dt) {
+        if (this.waveformTimer > 0) {
+            this.waveformTimer -= dt; this.x += this.wdx * dt; this.y += this.wdy * dt;
+            this.x = Math.max(0, Math.min(3200, this.x)); this.y = Math.max(0, Math.min(900, this.y));
+            let enemies = this.team === 'radiant' ? game.direEntities() : game.direEntities();
+            for (let e of enemies) {
+                if (!this.wHits.includes(e) && Math.hypot(e.x - this.x, e.y - this.y) < 65) {
+                    e.takeDamage(150, this); this.wHits.push(e);
+                }
+            }
+            if (this.waveformTimer <= 0) { this.invulnerable = false; this.targetX = this.x; this.targetY = this.y; }
+        } else {
+            super.update(dt);
+
+            if (!this.isDead && (this.isShiftingAgility || this.isShiftingStrength)) {
+                this.shiftTimer += dt;
+                if (this.shiftTimer >= 0.1) {
+                    this.shiftTimer -= 0.1;
+                    this.processAttributeShift();
+                }
+            }
+        }
+    }
+
+    processAttributeShift() {
+        if (this.isShiftingAgility && this.baseStrength > this.minStatLimit) {
+            this.baseStrength--;
+            this.baseAgility++;
+            this.recalculateStats(-1);
+        } else if (this.isShiftingStrength && this.baseAgility > this.minStatLimit) {
+            this.baseAgility--;
+            this.baseStrength++;
+            this.recalculateStats(1);
+        }
+    }
+
+    recalculateStats(hpDirection) {
+        let hpPercentage = this.hp / this.maxHp;
+        this.maxHp = this.morphBaseHp + (this.baseStrength - 22) * 20;
+        this.hp = Math.max(1, this.maxHp * hpPercentage);
+        this.damage = this.morphBaseDamage + (this.baseAgility - 24);
+        this.attackRange = 230 + (this.baseAgility - 24) * 5;
+        let agilityBonus = (this.baseAgility - 24) * 0.01;
+        this.attackSpeed = Math.max(0.3, 1.2 / (1 + agilityBonus));
+
+        if (game.playerHero === this) {
+            if (this.isShiftingAgility) {
+                game.uiManager.addFloatingText(this.x, this.y - 30, "+AGI", '#00ffcc');
+            } else if (this.isShiftingStrength) {
+                game.uiManager.addFloatingText(this.x, this.y - 30, "+STR", '#ff3333');
+            }
+        }
+    }
+
+    draw(ctx, camera) {
+        if (this.isDead) return;
+        super.draw(ctx, camera);
+        let sx = this.x - camera.x; let sy = this.y - camera.y;
+        if (this.isShiftingAgility) {
+            ctx.save();
+            ctx.strokeStyle = '#00ffcc';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(sx, sy, this.radius + 6, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        } else if (this.isShiftingStrength) {
+            ctx.save();
+            ctx.strokeStyle = '#ff3333';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(sx, sy, this.radius + 6, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+}
+
+class AdaptiveStrikeProjectile {
+    constructor(x, y, target, team, caster) {
+        this.x = x; this.y = y; this.target = target; this.team = team; this.caster = caster;
+        this.speed = 650; this.radius = 8; this.isDead = false;
+    }
+    update(dt) {
+        if (this.isDead || this.target.isDead) { this.isDead = true; return; }
+
+        let dx = this.target.x - this.x;
+        let dy = this.target.y - this.y;
+        let dist = Math.hypot(dx, dy);
+
+        if (dist <= 15) {
+            this.isDead = true;
+            let dmg = 80 + (this.caster.baseAgility * 1.5);
+            let stunDuration = 0.5 + (this.caster.baseStrength * 0.03);
+            this.target.takeDamage(dmg, this.caster);
+            this.target.stunned = true;
+            this.target.stunTimer = Math.min(3.0, stunDuration);
+            let pushAng = Math.atan2(dy, dx);
+            let pushDist = 80;
+            this.target.x += Math.cos(pushAng) * pushDist;
+            this.target.y += Math.sin(pushAng) * pushDist;
+            this.target.x = Math.max(0, Math.min(3200, this.target.x));
+            this.target.y = Math.max(0, Math.min(900, this.target.y));
+            this.target.targetX = this.target.x; this.target.targetY = this.target.y;
+        } else {
+            this.x += (dx / dist) * this.speed * dt;
+            this.y += (dy / dist) * this.speed * dt;
+        }
+    }
+    draw(ctx, camera) {
+        if (this.isDead) return;
+        let sx = this.x - camera.x; let sy = this.y - camera.y;
+        ctx.save();
+        ctx.fillStyle = '#00bfff';
+        ctx.shadowColor = '#00ffff';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(sx, sy, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+class Warlock extends Hero {
+    constructor(x, y, team) {
+        super(x, y, team, 'Warlock'); this.attackRange = 380;
+        this.abilities.push(new Ability('Fatal Bonds', 'active', 20, 120, 'Links visible enemies for 18 seconds. 15% of damage taken is shared between linked targets.'));
+        this.abilities.push(new Ability('Shadow Word', 'active', 15, 100, 'Heals allies or damages enemies in an area around the target every second.'));
+        this.abilities.push(new Ability('Upheaval', 'active', 30, 100, 'Toggled ability. Slows enemies in a 575 radius and deals 10 damage per second for up to 10 seconds.'));
+        this.abilities.push(new Ability('Chaotic Offering', 'active', 55, 200, 'Ultimate. Summons a golem (1500 HP, 20 sec) and stuns enemies in a 600 radius for 0.8 sec.'));
+        
+        this.fbLinks = [];
+        this.activeShadowWords = [];
+        this.isChannelingUpheaval = false;
+        this.upheavalTimer = 0;
+        this.upheavalX = 0;
+        this.upheavalY = 0;
+        this.upheavalAffected = [];
+        this.ultCooldown = 0;
+    }
+    
+    useAbility(idx) {
+        if (this.isDead) return;
+        
+        if (this.isChannelingUpheaval && idx === 2) {
+            this.isChannelingUpheaval = false;
+            this.resetUpheavalSlows();
+            return;
+        }
+        if (this._stunTime && this._stunTime > 0) return;
+
+        let enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+        
+        if (idx === 0) {
+            if (this.abilities[0].trigger(this)) {
+                let targets = enemies.filter(e => Math.hypot(e.x - this.x, e.y - this.y) <= 700).slice(0, 5);
+                if (targets.length > 0) {
+                    targets.forEach(t => {
+                        if (!t._fbPatched) {
+                            let origDamage = t.takeDamage;
+                            t.takeDamage = function(amount, attacker, isFb) {
+                                origDamage.call(this, amount, attacker);
+                                if (!isFb && !this.isDead && this._fbTimer > 0 && this._fbGroup) {
+                                    let share = amount * 0.15;
+                                    this._fbGroup.forEach(other => {
+                                        if (other !== this && !other.isDead && other._fbTimer > 0) {
+                                            other.takeDamage(share, attacker, true);
+                                        }
+                                    });
+                                }
+                            };
+                            t._fbPatched = true;
+                        }
+                        t._fbTimer = 18.0;
+                        t._fbGroup = targets;
+                    });
+                    this.fbLinks.push({ group: targets, timer: 18.0 });
+                }
+            }
+        }
+        else if (idx === 1) {
+            let swTarget = this.attackTarget || this;
+            if (swTarget && swTarget.blockSpell && swTarget.blockSpell(this)) return;
+            if (this.abilities[1].trigger(this)) {
+                this.activeShadowWords.push({ target: swTarget, timer: 10.0, tickTimer: 0 });
+            }
+        }
+        else if (idx === 2) {
+            if (this.abilities[2].trigger(this)) {
+                this.isChannelingUpheaval = true;
+                this.upheavalTimer = 10.0;
+                this.upheavalX = this.attackTarget ? this.attackTarget.x : this.targetX;
+                this.upheavalY = this.attackTarget ? this.attackTarget.y : this.targetY;
+                this.targetX = this.x; 
+                this.targetY = this.y;
+                this.attackTarget = null;
+            }
+        }
+        else if (idx === 3) {
+            if (!this.abilities[3].trigger(this)) return;
+            const cooldownDuration = 20;
+
+            if (!this.ultCooldown || this.ultCooldown <= 0) {
+                this.ultCooldown = cooldownDuration;
+
+                if (typeof audioManager !== 'undefined') audioManager.play('buy');
+
+                let potentialTargets = [];
+                if (game.creeps) potentialTargets = potentialTargets.concat(game.creeps);
+                if (game.towers) potentialTargets = potentialTargets.concat(game.towers);
+                if (game.ancients) potentialTargets = potentialTargets.concat(game.ancients);
+                if (game.playerHero) potentialTargets.push(game.playerHero);
+                if (game.enemyHero) potentialTargets.push(game.enemyHero);
+
+                let tx = this.attackTarget ? this.attackTarget.x : this.targetX;
+                let ty = this.attackTarget ? this.attackTarget.y : this.targetY;
+
+                potentialTargets.forEach(entity => {
+                    if (entity && entity.hp > 0 && entity.team !== this.team) {
+                        let dist = Math.hypot(entity.x - tx, entity.y - ty);
+                        if (dist <= 600) {
+                            entity.stunned = true;
+                            entity.stunTimer = 0.8;
+                        }
+                    }
+                });
+
+                let golem = new WarlockGolem(tx, ty, this.team);
+                game.creeps.push(golem);
+            }
+        }
+    }
+
+    update(dt) {
+        if (this.isChannelingUpheaval) {
+            this.targetX = this.x; 
+            this.targetY = this.y;
+            this.attackTarget = null;
+        }
+
+        if (this.ultCooldown > 0) {
+            this.ultCooldown -= dt;
+            if (this.ultCooldown < 0) this.ultCooldown = 0;
+        }
+
+        super.update(dt);
+        
+        if (this.isDead) {
+            if (this.isChannelingUpheaval) {
+                this.isChannelingUpheaval = false;
+                this.resetUpheavalSlows();
+            }
+            return;
+        }
+
+        if (this.isChannelingUpheaval) {
+            if (this._stunTime && this._stunTime > 0) {
+                this.isChannelingUpheaval = false;
+                this.resetUpheavalSlows();
+            } else {
+                this.upheavalTimer -= dt;
+                if (this.upheavalTimer <= 0) {
+                    this.isChannelingUpheaval = false;
+                    this.resetUpheavalSlows();
+                } else {
+                    let enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+                    let currentSlowMult = Math.max(0.1, 1.0 - (10.0 - this.upheavalTimer) * 0.1);
+                    
+                    for (let i = this.upheavalAffected.length - 1; i >= 0; i--) {
+                        let e = this.upheavalAffected[i];
+                        if (Math.hypot(e.x - this.upheavalX, e.y - this.upheavalY) > 300 || e.isDead || !this.isChannelingUpheaval) {
+                            if (e._origBaseSpeed !== undefined) {
+                                e.baseSpeed = e._origBaseSpeed;
+                                delete e._origBaseSpeed;
+                            }
+                            this.upheavalAffected.splice(i, 1);
+                        }
+                    }
+
+                    enemies.forEach(e => {
+                        if (Math.hypot(e.x - this.upheavalX, e.y - this.upheavalY) <= 300) {
+                            if (e._origBaseSpeed === undefined) {
+                                e._origBaseSpeed = e.baseSpeed;
+                                this.upheavalAffected.push(e);
+                            }
+                            e.baseSpeed = e._origBaseSpeed * currentSlowMult;
+                            
+                            if (!e._upheavalTickTimer) e._upheavalTickTimer = 0;
+                            e._upheavalTickTimer += dt;
+                            if (e._upheavalTickTimer >= 1.0) {
+                                e._upheavalTickTimer -= 1.0;
+                                e.takeDamage(10, this);
+                            }
+                        }
+                    });
+                }
+            }
+        }
+
+        for (let i = this.fbLinks.length - 1; i >= 0; i--) {
+            this.fbLinks[i].timer -= dt;
+            if (this.fbLinks[i].timer <= 0) {
+                this.fbLinks[i].group.forEach(t => t._fbTimer = 0);
+                this.fbLinks.splice(i, 1);
+            }
+        }
+
+        for (let i = this.activeShadowWords.length - 1; i >= 0; i--) {
+            let sw = this.activeShadowWords[i];
+            sw.timer -= dt;
+            sw.tickTimer += dt;
+            if (sw.target.isDead) {
+                this.activeShadowWords.splice(i, 1);
+                continue;
+            }
+            if (sw.tickTimer >= 1.0) {
+                sw.tickTimer -= 1.0;
+                let isAllyTarget = (sw.target.team === this.team);
+                let entities = isAllyTarget ? (this.team === 'radiant' ? game.radiantEntities() : game.direEntities()) 
+                                            : (this.team === 'radiant' ? game.direEntities() : game.radiantEntities());
+                
+                entities.forEach(e => {
+                    if (Math.hypot(e.x - sw.target.x, e.y - sw.target.y) <= 300) {
+                        if (isAllyTarget) {
+                            e.hp = Math.min(e.maxHp, e.hp + 45);
+                            if (e === game.playerHero) game.uiManager.addFloatingText(e.x, e.y - 25, "+45", '#00ff66');
+                        } else {
+                            e.takeDamage(45, this);
+                        }
+                    }
+                });
+            }
+            if (sw.timer <= 0) {
+                this.activeShadowWords.splice(i, 1);
+            }
+        }
+    }
+
+    resetUpheavalSlows() {
+        this.upheavalAffected.forEach(e => {
+            if (e._origBaseSpeed !== undefined) {
+                e.baseSpeed = e._origBaseSpeed;
+                delete e._origBaseSpeed;
+            }
+        });
+        this.upheavalAffected = [];
+    }
+
+    draw(ctx, camera) {
+        if (this.isDead) return;
+
+        if (this.isChannelingUpheaval) {
+            let sx = this.upheavalX - camera.x; let sy = this.upheavalY - camera.y;
+            ctx.save();
+            ctx.fillStyle = 'rgba(75, 0, 130, 0.3)';
+            ctx.strokeStyle = '#4b0082';
+            ctx.beginPath(); ctx.arc(sx, sy, 250, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+            ctx.restore();
+        }
+
+        ctx.save();
+        ctx.strokeStyle = '#ff0000';
+        ctx.lineWidth = 2;
+        this.fbLinks.forEach(link => {
+            let group = link.group.filter(t => !t.isDead);
+            for (let i = 0; i < group.length; i++) {
+                for (let j = i + 1; j < group.length; j++) {
+                    ctx.beginPath();
+                    ctx.moveTo(group[i].x - camera.x, group[i].y - camera.y);
+                    ctx.lineTo(group[j].x - camera.x, group[j].y - camera.y);
+                    ctx.stroke();
+                }
+            }
+        });
+        ctx.restore();
+
+        this.activeShadowWords.forEach(sw => {
+            let sx = sw.target.x - camera.x; let sy = sw.target.y - camera.y;
+            ctx.save();
+            ctx.strokeStyle = (sw.target.team === this.team) ? '#00ff66' : '#8a2be2';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([10, 15]);
+            ctx.beginPath(); ctx.arc(sx, sy, 300, 0, Math.PI * 2); ctx.stroke();
+            ctx.restore();
+        });
+
+        super.draw(ctx, camera);
+    }
+}
+
+class Sniper extends Hero {
+    constructor(x, y, team) {
+        super(x, y, team, 'Sniper'); 
+        this.baseRange = 320; 
+        this.attackRange = this.baseRange + 140; 
+        
+        this.abilities.push(new Ability('Shrapnel', 'active', 0, 50, 'Creates an area of explosive shrapnel. Deals 35 damage per second and slows enemies by 25%. Up to 2 charges.'));
+        this.abilities.push(new Ability('Headshot', 'passive', 0, 0, 'Passive. 30% chance to deal +20 damage, knock back the enemy, and slow their movement and attack for 1.5 sec.'));
+        this.abilities.push(new Ability('Take Aim', 'active', 15, 60, 'Passive: +140 attack range. Active: +150 range and 60% Headshot chance, but slows movement by 65% for 6 sec.'));
+        this.abilities.push(new Ability('Assassinate', 'active', 18, 150, 'Ultimate. Channels for 1.5 sec and deals massive long-range damage.'));
+        
+        this.aimTimer = 0; 
+        this.assTarget = null; 
+        this.assChannel = 0;
+        
+        this.shrapnelCharges = 2;
+        this.maxShrapnelCharges = 2;
+        this.shrapnelChargeRegenTimer = 0;
+        this.shrapnelChargeCooldown = 15;
+    }
+    useAbility(idx) {
+        if (this.isDead) return;
+        if (idx === 0) { 
+            let ab = this.abilities[0];
+            if (this.shrapnelCharges > 0 && this.mp >= ab.manaCost) {
+                this.mp -= ab.manaCost;
+                this.shrapnelCharges--;
+                audio.play('ability');
+                let tx = this.targetX;
+                let ty = this.targetY;
+                if (this.attackTarget) { tx = this.attackTarget.x; ty = this.attackTarget.y; }
+                game.shrapnelZones.push(new ShrapnelZone(tx, ty, this.team, this));
+            }
+        }
+        if (idx === 2) { 
+            if (this.abilities[2].trigger(this)) {
+                this.aimTimer = 6.0;
+            }
+        }
+        if (idx === 3) { 
+            let enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+            let t = this.attackTarget || enemies.find(e => Math.hypot(e.x - this.x, e.y - this.y) < 950);
+            if (t && t.blockSpell && t.blockSpell(this)) return;
+            if (t && this.abilities[3].trigger(this)) { this.assTarget = t; this.assChannel = 1.5; }
+        }
+    }
+    update(dt) {
+        if (this.shrapnelCharges < this.maxShrapnelCharges) {
+            this.shrapnelChargeRegenTimer += dt;
+            if (this.shrapnelChargeRegenTimer >= this.shrapnelChargeCooldown) {
+                this.shrapnelCharges++;
+                this.shrapnelChargeRegenTimer = 0;
+            }
+        }
+
+        if (this.aimTimer > 0) { 
+            this.aimTimer -= dt; 
+            this.attackRange = this.baseRange + 140 + 150; 
+        } else { 
+            this.attackRange = this.baseRange + 140; 
+        }
+
+        super.update(dt);
+        if (this.isDead) return;
+
+        if (this.assChannel > 0) {
+            this.targetX = this.x; this.targetY = this.y;
+            if (!this.assTarget || this.assTarget.isDead) { this.assChannel = 0; this.assTarget = null; return; }
+            this.assChannel -= dt;
+            if (this.assChannel <= 0) {
+                audio.play('ability');
+                let proj = new Projectile(this.x, this.y, this.assTarget, 380, this.team, this);
+                proj.speed = 1000; proj.isAss = true; game.projectiles.push(proj);
+                this.assTarget = null;
+            }
+        }
+    }
+    performAttack() {
+        if (this.assChannel > 0) return;
+        this.attackCooldown = this.attackSpeed; audio.play('attack');
+        
+        let hsChance = this.aimTimer > 0 ? 0.60 : 0.30;
+        let isHs = Math.random() < hsChance; 
+        let dmg = this.damage;
+        if (isHs) { dmg += 20; }
+        
+        let p = new Projectile(this.x, this.y, this.attackTarget, dmg, this.team, this);
+        if (isHs) p.isHs = true;
+        game.projectiles.push(p);
+    }
+    draw(ctx, camera) {
+        super.draw(ctx, camera);
+        if (this.isDead) return;
+        let sx = this.x - camera.x; let sy = this.y - camera.y;
+        if (this.aimTimer > 0) {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.7)'; ctx.lineWidth = 3;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath(); ctx.arc(sx, sy, this.radius + 12, 0, Math.PI*2); ctx.stroke();
+            ctx.restore();
+        }
+        if (this.assChannel > 0 && this.assTarget) {
+            ctx.strokeStyle = '#ff0000'; ctx.lineWidth = 1.5; ctx.beginPath();
+            ctx.moveTo(sx, sy); ctx.lineTo(this.assTarget.x - camera.x, this.assTarget.y - camera.y); ctx.stroke();
+        }
+    }
+}
+
+class ShrapnelZone {
+    constructor(x, y, team, caster) {
+        this.x = x; this.y = y; this.team = team; this.caster = caster;
+        this.radius = 160; this.duration = 6.0; this.damagePerSecond = 35;
+        this.slowAmount = 0.25; this.tickTimer = 0;
+    }
+    update(dt) {
+        this.duration -= dt; this.tickTimer += dt;
+        if (this.tickTimer >= 1.0) {
+            this.tickTimer -= 1.0;
+            let enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+            for (let e of enemies) {
+                if (!(e instanceof Tower) && !(e instanceof Ancient)) {
+                    if (Math.hypot(e.x - this.x, e.y - this.y) <= this.radius) {
+                        e.takeDamage(this.damagePerSecond, this.caster);
+                    }
+                }
+            }
+        }
+        return this.duration <= 0;
+    }
+    draw(ctx, camera) {
+        let sx = this.x - camera.x; let sy = this.y - camera.y;
+        ctx.save();
+        ctx.strokeStyle = 'rgba(218, 165, 32, 0.4)'; ctx.lineWidth = 2;
+        ctx.fillStyle = 'rgba(218, 165, 32, 0.08)';
+        ctx.beginPath(); ctx.arc(sx, sy, this.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        
+        ctx.fillStyle = 'rgba(255, 215, 0, 0.25)';
+        for (let i = 0; i < 4; i++) {
+            let px = sx + (Math.random() - 0.5) * this.radius * 1.4;
+            let py = sy + (Math.random() - 0.5) * this.radius * 1.4;
+            if (Math.hypot(px - sx, py - sy) <= this.radius) {
+                ctx.beginPath(); ctx.arc(px, py, 2, 0, Math.PI * 2); ctx.fill();
+            }
+        }
+        ctx.fillStyle = '#ffd700'; ctx.font = 'bold 10px Arial'; ctx.textAlign = 'center';
+        ctx.fillText(this.duration.toFixed(1) + 's', sx, sy - 4);
+        ctx.restore();
+    }
+}
+
+// --- КЛАССЫ КРИПОВ ---
+class Creep extends Entity {
+    constructor(x, y, team, type) {
+        let hp = type === 'melee' ? 320 : 230;
+        let dmg = type === 'melee' ? 19 : 22;
+        let rng = type === 'melee' ? 45 : 280;
+        super(x, y, team, 11, hp, dmg, 195); this.type = type; this.attackRange = rng; this.attackSpeed = 1.1;
+    }
+    takeDamage(amount, attacker) {
+        if (this.isDead) return;
+
+        const actualAttacker = attacker && !(attacker instanceof Entity) && attacker.attacker instanceof Entity
+            ? attacker.attacker
+            : attacker;
+
+        super.takeDamage(amount, attacker);
+        if (this.isDead) return;
+
+        if (actualAttacker instanceof Entity && actualAttacker !== this && actualAttacker.team !== this.team && !actualAttacker.isDead) {
+            this.attackTarget = actualAttacker;
+        }
+    }
+    isClicked(mouseX, mouseY) {
+        const clickHitboxRadius = this.radius + 15;
+        const dx = mouseX - this.x;
+        const dy = mouseY - this.y;
+        return Math.hypot(dx, dy) <= clickHitboxRadius;
+    }
+    update(dt) {
+        if (this.isDead) return;
+        
+        let rate = 1.0;
+        if (this.headshotSlowTimer > 0) rate = 0.5;
+        if (this.attackCooldown > 0) this.attackCooldown -= dt * rate;
+
+        if (!this.attackTarget || this.attackTarget.hp <= 0 || this.attackTarget.team === this.team) {
+            let closest = null;
+            let minDist = Infinity;
+
+            // 1. Вражеские крипы
+            for (let creep of game.creeps) {
+                if (!creep || creep.isDead || creep.team === this.team) continue;
+                let dist = Math.hypot(creep.x - this.x, creep.y - this.y);
+
+                if (dist < minDist) {
+                    minDist = dist;
+                    closest = creep;
+                }
+            }
+
+            // 2. Герои только если очень близко и нет крипов
+            if (!closest) {
+                const heroes = [game.playerHero, game.enemyHero];
+
+                for (let hero of heroes) {
+                    if (!hero || hero.isDead || hero.team === this.team) continue;
+                    let dist = Math.hypot(hero.x - this.x, hero.y - this.y);
+
+                    if (dist <= 100) {
+                        minDist = dist;
+                        closest = hero;
+                    }
+                }
+            }
+
+            // 3. Башни
+            if (!closest) {
+                for (let tower of game.towers) {
+                    if (!tower || tower.isDead || tower.team === this.team) continue;
+                    let dist = Math.hypot(tower.x - this.x, tower.y - this.y);
+
+                    if (dist < minDist) {
+                        minDist = dist;
+                        closest = tower;
+                    }
+                }
+            }
+
+            // 4. Трон
+            if (!closest) {
+                for (let ancient of game.ancients) {
+                    if (!ancient || ancient.isDead || ancient.team === this.team) continue;
+                    closest = ancient;
+                    break;
+                }
+            }
+
+            this.attackTarget = closest;
+        }
+
+        if (!this.attackTarget) {
+            this.targetX = this.team === 'radiant' ? 3200 : 0;
+            this.targetY = game.map.laneY;
+        }
+
+        this.updateMovement(dt);
+        if (this.attackTarget) {
+            let d = Math.hypot(this.attackTarget.x - this.x, this.attackTarget.y - this.y);
+            if (d <= this.attackRange && this.attackCooldown <= 0) {
+                this.attackCooldown = this.attackSpeed;
+                let finalDamage = this.damage;
+                if (this.vladmirAura) finalDamage *= 1.18;
+                if (this.type === 'melee') { 
+                    this.attackTarget.takeDamage(finalDamage, this);
+                    // Vampirism on hit
+                    if (this.vladmirAura) {
+                        let lifesteal = finalDamage * 0.20;
+                        if (this.attackTarget instanceof Creep) lifesteal *= 0.6;
+                        this.hp = Math.min(this.maxHp, this.hp + lifesteal);
+                    }
+                }
+                else { game.projectiles.push(new Projectile(this.x, this.y, this.attackTarget, finalDamage, this.team, this)); }
+            }
+        }
+    }
+    onDeath(attacker) {
+        audio.play('creep_death');
+        if (!attacker) return;
+        if (attacker instanceof Hero) {
+            let b = this.type === 'melee' ? 42 : 58; attacker.gold += b;
+            if (attacker === game.playerHero) game.uiManager.addFloatingText(this.x, this.y - 15, `+${b} 🪙`, '#ffd700');
+        }
+        let heroes = [game.playerHero, game.enemyHero].filter(h => h && !h.isDead);
+        for (let h of heroes) { if (Math.hypot(h.x - this.x, h.y - this.y) < 600) h.addXp(40); }
+    }
+    draw(ctx, camera) {
+        this.drawShadow(ctx, camera);
+        let sx = this.x - camera.x; let sy = this.y - camera.y;
+        ctx.save(); ctx.fillStyle = this.team === 'radiant' ? '#7cfc00' : '#8b008b';
+        ctx.beginPath(); ctx.arc(sx, sy, this.radius, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+
+        if (this.hitEffectTimer > 0) {
+            ctx.save(); ctx.fillStyle = 'rgba(255, 68, 0, 0.6)';
+            ctx.beginPath(); ctx.arc(sx, sy, this.radius * 1.4, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+        }
+        this.drawHealthBar(ctx, camera);
+    }
+}
+
+class WarlockGolem extends Creep {
+    constructor(x, y, team) {
+        super(x, y, team, 'melee');
+        this.radius = 25;
+        this.maxHp = 1200;
+        this.hp = 1200;
+        this.damage = 60;
+        this.baseSpeed = 200;
+        this.speed = 200;
+        this.attackRange = 90;
+        this.lifeTime = 20.0;
+    }
+    update(dt) {
+        if (this.isDead) return;
+        this.lifeTime -= dt;
+        if (this.lifeTime <= 0) {
+            this.hp = 0;
+            this.isDead = true;
+            return;
+        }
+        super.update(dt);
+    }
+    draw(ctx, camera) {
+        if (this.isDead) return;
+        this.drawShadow(ctx, camera);
+        let sx = this.x - camera.x; let sy = this.y - camera.y;
+        ctx.save(); ctx.fillStyle = '#8b0000';
+        ctx.beginPath(); ctx.arc(sx, sy, this.radius, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        
+        if (this.hitEffectTimer > 0) {
+            ctx.save(); ctx.fillStyle = 'rgba(255, 68, 0, 0.6)';
+            ctx.beginPath(); ctx.arc(sx, sy, this.radius * 1.4, 0, Math.PI * 2); ctx.fill();
+            ctx.restore();
+        }
+        this.drawHealthBar(ctx, camera);
+    }
+}
+
+// --- СТРУКТУРЫ И СНАРЯДЫ ---
+class Catapult extends Entity {
+    constructor(x, y, team) {
+        super(x, y, team, 24, 700, 90, 70);
+        this.attackRange = 350;
+        this.attackCooldown = 0;
+        this.attackSpeed = 2.5; // атака раз в 2.5 секунды
+        this.bounty = 80;
+    }
+
+    update(dt) {
+        if (this.isDead) return;
+
+        let rate = 1.0;
+        if (this.headshotSlowTimer > 0) rate = 0.5;
+        if (this.attackCooldown > 0) this.attackCooldown -= dt * rate;
+
+        if (!this.attackTarget || this.attackTarget.hp <= 0 || this.attackTarget.team === this.team) {
+            let closest = null;
+            let minDist = Infinity;
+
+            let potentialTargets = [];
+            if (game.creeps) potentialTargets = potentialTargets.concat(game.creeps);
+            if (game.towers) potentialTargets = potentialTargets.concat(game.towers);
+            if (game.ancients) potentialTargets = potentialTargets.concat(game.ancients);
+            if (game.playerHero) potentialTargets.push(game.playerHero);
+            if (game.enemyHero) potentialTargets.push(game.enemyHero);
+
+            for (let entity of potentialTargets) {
+                if (!entity || entity.hp <= 0) continue;
+                if (entity.team !== this.team) {
+                    let dist = Math.hypot(entity.x - this.x, entity.y - this.y);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        closest = entity;
+                    }
+                }
+            }
+            this.attackTarget = closest;
+        }
+
+        if (!this.attackTarget) {
+            this.targetX = this.team === 'radiant' ? 4000 : 0;
+            this.targetY = game.map.laneY;
+        }
+
+        this.updateMovement(dt);
+        if (this.attackTarget) {
+            let d = Math.hypot(this.attackTarget.x - this.x, this.attackTarget.y - this.y);
+            if (d <= this.attackRange && this.attackCooldown <= 0) {
+                this.performAttack();
+            }
+        }
+    }
+
+    performAttack() {
+        if (!this.attackTarget || this.attackTarget.isDead) {
+            return;
+        }
+
+        let damage = this.damage;
+
+        if (this.attackTarget instanceof Tower || this.attackTarget instanceof Ancient) {
+            damage *= 2;
+        }
+
+        game.projectiles.push(
+            new Projectile(
+                this.x,
+                this.y,
+                this.attackTarget,
+                damage,
+                this.team,
+                this
+            )
+        );
+        this.attackCooldown = this.attackSpeed;
+    }
+
+    draw(ctx, camera) {
+        const screenX = this.x - camera.x;
+        const screenY = this.y - camera.y;
+
+        // Корпус
+        ctx.fillStyle = this.team === 'radiant' ? '#4caf50' : '#c62828';
+        ctx.fillRect(screenX - 18, screenY - 12, 36, 24);
+
+        // Колёса
+        ctx.fillStyle = '#5d4037';
+
+        ctx.beginPath();
+        ctx.arc(screenX - 12, screenY + 14, 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(screenX + 12, screenY + 14, 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Метательное устройство
+        ctx.strokeStyle = '#8d6e63';
+        ctx.lineWidth = 4;
+
+        ctx.beginPath();
+        ctx.moveTo(screenX, screenY - 8);
+        ctx.lineTo(screenX + (this.team === 'radiant' ? 20 : -20), screenY - 25);
+        ctx.stroke();
+
+        // Полоска HP
+        const barWidth = 40;
+
+        ctx.fillStyle = '#000';
+        ctx.fillRect(screenX - 20, screenY - 35, barWidth, 5);
+
+        ctx.fillStyle = '#4caf50';
+        ctx.fillRect(
+            screenX - 20,
+            screenY - 35,
+            barWidth * (this.hp / this.maxHp),
+            5
+        );
+    }
+}
+
+ 
+class Tower extends Entity {
+    constructor(x, y, team) {
+        super(x, y, team, 32, 4500, 85, 0);
+        this.attackRange = 360;
+        this.attackSpeed = 1.3;
+        this.glyphActive = false;
+        this.glyphTimer = 0;
+    }
+    update(dt) {
+        if (this.isDead) return;
+        if (this.glyphActive) {
+            this.glyphTimer -= dt;
+            if (this.glyphTimer <= 0) {
+                this.glyphActive = false;
+                this.glyphTimer = 0;
+            }
+        }
+        if (this.attackCooldown > 0) this.attackCooldown -= dt;
+        let enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+        this.attackTarget = null;
+        for (let e of enemies) {
+            if (Math.hypot(e.x - this.x, e.y - this.y) <= this.attackRange) { this.attackTarget = e; break; }
+        }
+        if (this.attackTarget && this.attackCooldown <= 0) {
+            this.attackCooldown = this.attackSpeed;
+            game.projectiles.push(new Projectile(this.x, this.y - 40, this.attackTarget, this.damage, this.team, this));
+        }
+    }
+    takeDamage(amount, attacker) {
+        if (this.isDead || this.glyphActive) return;
+        super.takeDamage(amount, attacker);
+    }
+    onDeath(attacker) { audio.play('tower_break'); }
+    draw(ctx, camera) {
+        if (this.isDead) return; this.drawShadow(ctx, camera);
+        let sx = this.x - camera.x; let sy = this.y - camera.y;
+        if (this.glyphActive) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(sx, sy - 10, this.radius + 18, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(0, 191, 255, 0.8)';
+            ctx.lineWidth = 4;
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = '#00bfff';
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(0, 191, 255, 0.1)';
+            ctx.fill();
+            ctx.restore();
+        }
+        ctx.fillStyle = '#465262'; ctx.fillRect(sx - 20, sy - 50, 40, 65);
+        ctx.fillStyle = this.team === 'radiant' ? '#2e8b57' : '#8b2525';
+        ctx.fillRect(sx - 16, sy - 45, 32, 12);
+        this.drawHealthBar(ctx, camera);
+    }
+}
+
+class Ancient extends Entity {
+    constructor(x, y, team) { super(x, y, team, 45, 2800, 0, 0); }
+    onDeath(attacker) { game.endGame(this.team === 'radiant' ? 'dire' : 'radiant'); }
+    draw(ctx, camera) {
+        if (this.isDead) return; this.drawShadow(ctx, camera);
+        let sx = this.x - camera.x; let sy = this.y - camera.y;
+        ctx.save();
+        ctx.fillStyle = this.team === 'radiant' ? '#1c5e3a' : '#611a1a';
+        ctx.strokeStyle = '#d4af37'; ctx.lineWidth = 3;
+        ctx.fillRect(sx - 45, sy - 45, 90, 75); ctx.strokeRect(sx - 45, sy - 45, 90, 75);
+        ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.fillRect(sx - 35, sy - 35, 70, 55);
+        ctx.restore(); this.drawHealthBar(ctx, camera);
+    }
+}
+
+class Fountain {
+    constructor(x, y, team) { this.x = x; this.y = y; this.team = team; this.radius = 150; }
+    update(dt) {
+        let heroes = [game.playerHero, game.enemyHero].filter(h => h && !h.isDead && h.team === this.team);
+        for (let h of heroes) {
+            if (Math.hypot(h.x - this.x, h.y - this.y) <= this.radius) {
+                h.hp = Math.min(h.maxHp, h.hp + 100 * dt); h.mp = Math.min(h.maxMp, h.mp + 100 * dt);
+            }
+        }
+    }
+    draw(ctx, camera) {
+        let sx = this.x - camera.x; let sy = this.y - camera.y;
+        ctx.save();
+        ctx.shadowBlur = 25; ctx.shadowColor = this.team === 'radiant' ? '#00bfff' : '#ff4500';
+        ctx.fillStyle = this.team === 'radiant' ? 'rgba(0,191,255,0.15)' : 'rgba(255,69,0,0.15)';
+        ctx.beginPath(); ctx.arc(sx, sy, this.radius, 0, Math.PI*2); ctx.fill();
+        ctx.shadowBlur = 0; ctx.fillStyle = '#2f4f4f'; ctx.beginPath(); ctx.arc(sx, sy, 30, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+    }
+}
+
+class Projectile {
+    constructor(x, y, target, damage, team, attacker) {
+        this.x = x; this.y = y; this.target = target; this.damage = damage; this.team = team; this.attacker = attacker;
+        this.speed = 500; this.radius = 5; this.isHs = false; this.isAss = false;
+    }
+    update(dt) {
+        if (!this.target || this.target.isDead) return true;
+        let dx = this.target.x - this.x; let dy = this.target.y - this.y;
+        let dist = Math.hypot(dx, dy);
+        if (dist < 12) {
+            if (this.isHs) {
+                this.target.slowTimer = 1.5;
+                this.target.headshotSlowTimer = 1.5;
+                this.target.hitEffectTimer = 0.2;
+                
+                if (!(this.target instanceof Tower) && !(this.target instanceof Ancient)) {
+                    let dx = this.target.x - this.attacker.x;
+                    let dy = this.target.y - this.attacker.y;
+                    let dist = Math.hypot(dx, dy) || 1;
+                    let pushDistance = 35;
+                    this.target.x += (dx / dist) * pushDistance;
+                    this.target.y += (dy / dist) * pushDistance;
+                    this.target.x = Math.max(50, Math.min(3150, this.target.x));
+                    this.target.y = Math.max(50, Math.min(850, this.target.y));
+                }
+                
+                game.uiManager.addFloatingText(this.target.x, this.target.y - 30, "HEADSHOT", '#ffa500');
+            }
+            this.target.takeDamage(this.damage, this.attacker);
+            // Vampirism from Vladmir's Offering
+            try {
+                const attacker = this.attacker;
+                if (attacker && attacker.vladmirAura) {
+                    let lifesteal = this.damage * 0.20;
+                    if (this.target instanceof Creep) lifesteal *= 0.6;
+                    attacker.hp = Math.min(attacker.maxHp, attacker.hp + lifesteal);
+                }
+            } catch (e) {}
+            if (this.isAss && this.target.isDead) { game.uiManager.addFloatingText(this.target.x, this.target.y - 45, "ASSASSINATED!", '#ff0000'); }
+            return true;
+        }
+        this.x += (dx / dist) * this.speed * dt; this.y += (dy / dist) * this.speed * dt;
+        return false;
+    }
+    draw(ctx, camera) {
+        let sx = this.x - camera.x; let sy = this.y - camera.y;
+        ctx.fillStyle = this.isAss ? '#ff0000' : (this.isHs ? '#ff8c00' : '#ffff00');
+        ctx.beginPath(); ctx.arc(sx, sy, this.radius, 0, Math.PI*2); ctx.fill();
+    }
+}
+
+class BountyRune {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.radius = 12;
+        this.clickRadius = 35;
+        this.isSpawned = true;
+        this.respawnTimer = 0;
+        this.respawnCooldown = 60;
+        this.goldReward = 70;
+        this.color = '#f59e0b';
+    }
+
+    isClicked(mouseX, mouseY) {
+        if (!this.isSpawned) return false;
+        const dx = mouseX - this.x;
+        const dy = mouseY - this.y;
+        return Math.hypot(dx, dy) <= this.clickRadius;
+    }
+
+    update(dt) {
+        if (!this.isSpawned) {
+            this.respawnTimer -= dt;
+            if (this.respawnTimer <= 0) {
+                this.isSpawned = true;
+            }
+        }
+    }
+
+    draw(ctx, camera) {
+        const screenX = this.x - camera.x;
+        const screenY = this.y - camera.y;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(screenX, screenY, 35, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(245, 158, 11, 0.06)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(245, 158, 11, 0.4)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.stroke();
+        ctx.restore();
+
+        if (this.isSpawned) {
+            const pulse = 1 + Math.sin(Date.now() * 0.005) * 0.1;
+            ctx.beginPath();
+            ctx.arc(screenX, screenY, this.radius * pulse, 0, Math.PI * 2);
+            ctx.fillStyle = this.color;
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 12px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('$', screenX, screenY);
+        }
+    }
+
+    pickup(hero) {
+        if (!this.isSpawned) return;
+        this.isSpawned = false;
+        this.respawnTimer = this.respawnCooldown;
+        if (hero && typeof hero.gainGold === 'function') {
+            hero.gainGold(this.goldReward);
+        } else if (hero) {
+            hero.gold += this.goldReward;
+        }
+        if (game.audioManager) {
+            game.audioManager.play('buy');
+        }
+    }
+}
+
+// --- УМНЫЙ ИСКУССТВЕННЫЙ ИНТЕЛЕКТ (AI) ---
+class AIController {
+    constructor(hero) { 
+        this.hero = hero; 
+        this.shopTimer = 0; 
+    }
+
+    update(dt) {
+        if (this.hero.isDead) return;
+        this.shopTimer += dt; 
+        if (this.shopTimer > 4) { this.shopTimer = 0; this.buyLogic(); }
+
+        // --- ИСПРАВЛЕННАЯ ЛОГИКА СБОРА РУН (БЕЗ ЗАСТРЕВАНИЯ) ---
+        let targetRune = null;
+        if (game.bountyRunes && game.bountyRunes.length > 0) {
+            // Фильтруем только существующие и еще не подобранные руны
+            let activeRunes = game.bountyRunes.filter(r => r && !r.isPickedUp);
+            let minRuneDist = 700; // Радиус обнаружения руны
+
+            for (let rune of activeRunes) {
+                let d = Math.hypot(rune.x - this.hero.x, rune.y - this.hero.y);
+                if (d < minRuneDist) {
+                    minRuneDist = d;
+                    targetRune = rune;
+                }
+            }
+        }
+
+        // Если нашли активную руну
+        if (targetRune) {
+            let distToRune = Math.hypot(targetRune.x - this.hero.x, targetRune.y - this.hero.y);
+            
+            // ЕСЛИ БОТ УЖЕ СЛИШКОМ БЛИЗКО (в радиусе подбора)
+            if (distToRune <= 40) {
+                // Принудительно помечаем руну как подобранную, чтобы сработал триггер игры
+                targetRune.isPickedUp = true;
+                
+                // Начисляем золото команде/герою, если это не произошло автоматически в движке игры
+                if (typeof targetRune.pickUp === 'function') {
+                    targetRune.pickUp(this.hero);
+                } else {
+                    this.hero.gold += 100; // Стандартный бонус золота
+                    if (game.uiManager) game.uiManager.addFloatingText(this.hero.x, this.hero.y - 40, "+100 🪙", '#ffd700');
+                }
+                
+                // Сбрасываем команду движения, чтобы бот переключился на линию
+                this.hero.attackTarget = null;
+            } else {
+                // Если бот еще далеко — просто бежим к ней
+                this.hero.attackTarget = null;
+                this.hero.moveTo(targetRune.x, targetRune.y);
+                return; // Блокируем остальной ИИ, пока идем к руне
+            }
+        }
+
+        // --- ЕСЛИ РУНЫ НЕТ ИЛИ ОНА ПОДОБРАНА, ИДЕМ ПО ДЕЛАМ ---
+        
+        // Отступление на базу при критическом уровне здоровья
+        if (this.hero.hp / this.hero.maxHp < 0.3) {
+            this.hero.attackTarget = null; 
+            this.hero.moveTo(this.hero.team === 'radiant' ? 40 : 3160, game.map.laneY); 
+            
+            if (this.hero instanceof Morphling) {
+                if (!this.hero.isShiftingStrength && this.hero.baseAgility > this.hero.minStatLimit) {
+                    this.hero.useAbility(3); 
+                }
+            }
+            return;
+        }
+
+        // Bot glyph usage when an allied tower is under attack and glyph is available
+        let alliedTowers = game.towers.filter(t => t.team === this.hero.team && !t.isDead);
+        let threatenedTower = alliedTowers.find(tower => {
+            let attackers = (tower.team === 'radiant' ? game.direEntities() : game.radiantEntities())
+                .filter(e => !e.isDead && Math.hypot(e.x - tower.x, e.y - tower.y) <= 420);
+            return attackers.length >= 2;
+        });
+
+        if (threatenedTower && game.glyphCooldown[this.hero.team] <= 0 && !game.glyphActive[this.hero.team]) {
+            game.activateGlyphForTeam(this.hero.team);
+            this.hero.attackTarget = null;
+            return;
+        }
+
+        let enemies = this.hero.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+        let allies = this.hero.team === 'radiant' ? game.radiantEntities() : game.direEntities();
+
+        // --- УПРАВЛЕНИЕ СПОСОБНОСТЯМИ MORPHLING ---
+        if (this.hero instanceof Morphling) {
+            let castRange = this.hero.attackRange + 150;
+            let targetEnemy = enemies.find(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) <= castRange && !e.isDead);
+
+            // Использование W — Adaptive Strike
+            if (targetEnemy && this.hero.abilities[1].currentCooldown === 0 && this.hero.mp >= 100) {
+                this.hero.attackTarget = targetEnemy;
+                this.hero.useAbility(1);
+            }
+
+            // Интеллектуальное переключение перекачки (Attribute Shift)
+            let currentHpPct = this.hero.hp / this.hero.maxHp;
+
+            if (currentHpPct < 0.6) {
+                let underAttack = enemies.some(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 500);
+                if (underAttack && !this.hero.isShiftingStrength && this.hero.baseAgility > this.hero.minStatLimit) {
+                    this.hero.useAbility(3); 
+                }
+            } else if (currentHpPct > 0.85 && targetEnemy) {
+                if (!this.hero.isShiftingAgility && this.hero.baseStrength > this.hero.minStatLimit) {
+                    this.hero.useAbility(2); 
+                }
+            } else {
+                if (this.hero.isShiftingAgility && currentHpPct < 0.7) {
+                    this.hero.useAbility(2); 
+                }
+                if (this.hero.isShiftingStrength && currentHpPct > 0.8) {
+                    this.hero.useAbility(3); 
+                }
+            }
+
+            // Использование Waveform
+            if (this.hero.abilities[0].currentCooldown === 0 && this.hero.mp >= 90) {
+                let enemiesInWave = enemies.filter(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 300);
+                if (enemiesInWave.length >= 2) {
+                    this.hero.useAbility(0);
+                }
+            }
+        } 
+        // --- ЛОГИКА ДЛЯ SNIPER ---
+        else if (this.hero instanceof Sniper) {
+            if (this.hero.shrapnelCharges > 0 && Math.random() < 0.05) {
+                let targetCreepOrHero = enemies.find(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 500);
+                if (targetCreepOrHero && this.hero.mp >= this.hero.abilities[0].manaCost) {
+                    this.hero.useAbility(0);
+                }
+            }
+            if (this.hero.abilities[2].currentCooldown === 0 && this.hero.aimTimer <= 0 && this.hero.mp >= this.hero.abilities[2].manaCost) {
+                if (enemies.some(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) <= this.hero.attackRange + 100)) {
+                    this.hero.useAbility(2);
+                }
+            }
+            if (this.hero.abilities[3].currentCooldown === 0 && this.hero.assChannel <= 0 && this.hero.mp >= this.hero.abilities[3].manaCost) {
+                let lowHpEnemy = enemies.find(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 950 && e.hp < 400 && !e.isDead);
+                if (lowHpEnemy) {
+                    this.hero.attackTarget = lowHpEnemy;
+                    this.hero.useAbility(3);
+                }
+            }
+        } 
+        // --- ЛОГИКА ДЛЯ WARLOCK ---
+        else if (this.hero instanceof Warlock) {
+            if (this.hero.isChannelingUpheaval) {
+                let enemiesInUpheaval = enemies.filter(e => Math.hypot(e.x - this.hero.upheavalX, e.y - this.hero.upheavalY) <= 575);
+                if (enemiesInUpheaval.length === 0) {
+                    this.hero.useAbility(2); 
+                } else {
+                    return; 
+                }
+            }
+
+            if (this.hero.abilities[0].currentCooldown === 0 && this.hero.mp >= this.hero.abilities[0].manaCost) {
+                let nearby = enemies.filter(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 700 && !(e._fbTimer > 0));
+                if (nearby.length >= 2) {
+                    this.hero.useAbility(0);
+                }
+            }
+
+            if (this.hero.level >= 6 && this.hero.abilities[3].currentCooldown === 0 && this.hero.mp >= this.hero.abilities[3].manaCost) {
+                let clumpedTarget = enemies.find(e => {
+                    return enemies.filter(other => Math.hypot(other.x - e.x, other.y - e.y) <= 600).length >= 2;
+                });
+                if (clumpedTarget && Math.hypot(clumpedTarget.x - this.hero.x, clumpedTarget.y - this.hero.y) <= 800) {
+                    this.hero.attackTarget = clumpedTarget;
+                    this.hero.useAbility(3);
+                }
+            }
+
+            if (this.hero.abilities[1].currentCooldown === 0 && this.hero.mp >= this.hero.abilities[1].manaCost) {
+                let lowHpAlly = allies.find(a => a.hp / a.maxHp < 0.4 && Math.hypot(a.x - this.hero.x, a.y - this.hero.y) < 600);
+                if (lowHpAlly) {
+                    this.hero.attackTarget = lowHpAlly;
+                    this.hero.useAbility(1);
+                } else {
+                    let clumpedEnemy = enemies.find(e => {
+                        return enemies.filter(other => Math.hypot(other.x - e.x, other.y - e.y) <= 300).length >= 2;
+                    });
+                    if (clumpedEnemy && Math.hypot(clumpedEnemy.x - this.hero.x, clumpedEnemy.y - this.hero.y) <= 600) {
+                        this.hero.attackTarget = clumpedEnemy;
+                        this.hero.useAbility(1);
+                    }
+                }
+            }
+
+            if (this.hero.abilities[2].currentCooldown === 0 && this.hero.mp >= this.hero.abilities[2].manaCost) {
+                let enemiesNear = enemies.filter(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 500);
+                if (enemiesNear.length > 0) {
+                    this.hero.attackTarget = enemiesNear[0];
+                    this.hero.useAbility(2);
+                    return; 
+                }
+            }
+        }
+
+        // Стандартный поиск ближайшей цели для атаки / пуша линии
+        let target = null; 
+        let minDist = Infinity;
+        for (let e of enemies) {
+            let d = Math.hypot(e.x - this.hero.x, e.y - this.hero.y);
+            if (d < minDist) { minDist = d; target = e; }
+        }
+        
+        if (target && minDist < 450) { 
+            this.hero.attackTarget = target; 
+        } else { 
+            this.hero.attackTarget = null; 
+            this.hero.moveTo(this.hero.team === 'radiant' ? 2200 : 1000, game.map.laneY); 
+        }
+    }
+
+    buyLogic() {
+        if (this.hero.gold >= 1000) {
+            let i = new Item('sword', 'Crystal Sword', 1000, { damageBonus: 25 });
+            if (this.hero.inventory.addItem(i)) this.hero.gold -= 1000;
+        }
+    }
+}
+
+// --- УПРАВЛЕНИЕ ИНТЕРФЕЙСОМ (UI) ---
+class UIManager {
+    constructor() { this.floatTexts = []; }
+    addFloatingText(x, y, text, color) { this.floatTexts.push({ x, y, text, color, life: 1.0 }); }
+    update(dt) {
+        for (let i = this.floatTexts.length - 1; i >= 0; i--) {
+            this.floatTexts[i].life -= dt; this.floatTexts[i].y -= 20 * dt;
+            if (this.floatTexts[i].life <= 0) this.floatTexts.splice(i, 1);
+        }
+        this.syncHUD();
+    }
+    syncHUD() {
+        let p = game.playerHero; if (!p) return;
+        document.getElementById('hero-level-badge').innerText = p.level;
+        document.getElementById('stat-damage').innerText = Math.floor(p.damage);
+        document.getElementById('stat-speed').innerText = Math.floor(p.speed);
+        document.getElementById('stat-range').innerText = Math.floor(p.attackRange);
+        document.getElementById('xp-bar').style.width = `${(p.xp / p.maxXp) * 100}%`;
+        document.getElementById('xp-text').innerText = `${p.xp}/${p.maxXp} XP`;
+        document.getElementById('hp-indicator').style.width = `${(p.hp / p.maxHp) * 100}%`;
+        document.getElementById('hp-text').innerText = `${Math.floor(p.hp)}/${p.maxHp}`;
+        document.getElementById('hp-regen-text').innerText = `+${p.getHpRegen().toFixed(1)}`;
+        document.getElementById('mp-indicator').style.width = `${(p.mp / p.maxMp) * 100}%`;
+        document.getElementById('mp-text').innerText = `${Math.floor(p.mp)}/${p.maxMp}`;
+        document.getElementById('mp-regen-text').innerText = `+${p.getMpRegen().toFixed(1)}`;
+        document.getElementById('gold-value').innerText = Math.floor(p.gold);
+
+        const profileIcon = document.getElementById('hero-profile-icon');
+        if (profileIcon) {
+            const heroKey = p.name || '';
+            if (profileIcon.dataset.hero !== heroKey) {
+                // only change src/alt when hero actually changes to avoid restarting GIF each frame
+                if (heroKey === 'Morphling') {
+                    profileIcon.src = 'images/morphling_profile.gif';
+                    profileIcon.alt = 'Morphling profile';
+                } else if (heroKey === 'Sniper') {
+                    profileIcon.src = 'images/sniper_profile.gif';
+                    profileIcon.alt = 'Sniper profile';
+                } else if (heroKey === 'Warlock') {
+                    profileIcon.src = 'images/warlock_profile.webp';
+                    profileIcon.alt = 'Warlock profile';
+                } else {
+                    profileIcon.src = '';
+                    profileIcon.alt = '';
+                }
+                profileIcon.dataset.hero = heroKey;
+            }
+            if (heroKey) profileIcon.classList.remove('hidden'); else profileIcon.classList.add('hidden');
+        }
+
+        let t = game.matchTime;
+        document.getElementById('match-timer').innerText = `${Math.floor(t/60).toString().padStart(2,'0')}:${Math.floor(t%60).toString().padStart(2,'0')}`;
+        let rt = game.ancients.find(a => a.team === 'radiant');
+        let dt = game.ancients.find(a => a.team === 'dire');
+        if (rt && dt) {
+            document.getElementById('radiant-throne-hp').innerText = `${Math.ceil((rt.hp/rt.maxHp)*100)}%`;
+            document.getElementById('dire-throne-hp').innerText = `${Math.ceil((dt.hp/dt.maxHp)*100)}%`;
+        }
+        
+        for (let i = 0; i < 4; i++) {
+            let slot = document.getElementById(`ability-${i}`);
+            let cd = document.getElementById(`cooldown-${i}`);
+            let tt = document.getElementById(`tooltip-${i}`);
+            let ab = p.abilities[i];
+            if (ab) {
+                if (slot) {
+                    slot.style.display = "flex";
+                    let displayName = ab.name;
+                    if (p instanceof Sniper && i === 0) {
+                        displayName = `${ab.name} (${p.shrapnelCharges})`;
+                    }
+                    slot.querySelector('.ability-name').innerText = displayName;
+                    tt.innerHTML = `<strong>${ab.name}</strong><br>${ab.description}<br>Mana: ${ab.manaCost} | CD: ${ab.maxCooldown}s`;
+                    
+                    if (p instanceof Sniper && i === 0) {
+                        if (p.shrapnelCharges === 0) {
+                            cd.style.opacity = 1;
+                            cd.innerText = Math.ceil(p.shrapnelChargeCooldown - p.shrapnelChargeRegenTimer);
+                        } else {
+                            cd.style.opacity = 0;
+                        }
+                    } else {
+                        if (ab.currentCooldown > 0) { cd.style.opacity = 1; cd.innerText = Math.ceil(ab.currentCooldown); }
+                        else { cd.style.opacity = 0; }
+                    }
+                }
+            } else {
+                if (slot) slot.style.display = "none";
+            }
+        }
+        for (let i = 0; i < 6; i++) {
+            let slot = document.querySelector(`.inventory-slot[data-slot="${i}"]`);
+            if (slot) {
+                let it = p.inventory.slots[i];
+                slot.innerText = it ? it.name.split(' ')[0] : '';
+                slot.style.background = it ? '#253341' : '#11161b';
+            }
+        }
+
+        let glyphBtn = document.getElementById('glyph-btn');
+        let glyphCd = document.getElementById('glyph-cooldown');
+        if (glyphBtn && glyphCd) {
+            let playerTeam = p?.team;
+            let cooldown = playerTeam ? game.glyphCooldown[playerTeam] : 0;
+            let active = playerTeam ? game.glyphActive[playerTeam] : false;
+            glyphBtn.disabled = !p || p.isDead || cooldown > 0;
+            if (active) {
+                glyphBtn.classList.add('active');
+                glyphBtn.title = `Glyph active (${Math.ceil(game.glyphTimer[playerTeam])}s)`;
+            } else {
+                glyphBtn.classList.remove('active');
+                glyphBtn.title = cooldown > 0
+                    ? `Glyph: ${Math.ceil(cooldown)}s`
+                    : 'Activate Glyph (Protect towers)';
+            }
+            if (cooldown > 0) {
+                glyphCd.innerText = Math.ceil(cooldown);
+                glyphCd.style.visibility = 'visible';
+                glyphCd.style.opacity = 1;
+            } else {
+                glyphCd.style.visibility = 'hidden';
+                glyphCd.style.opacity = 0;
+            }
+        }
+    }
+    draw(ctx, camera) {
+        ctx.save(); ctx.font = 'bold 14px Arial';
+        for (let t of this.floatTexts) {
+            ctx.fillStyle = t.color; ctx.globalAlpha = t.life; ctx.fillText(t.text, t.x - camera.x, t.y - camera.y);
+        }
+        ctx.restore(); this.drawMinimap();
+    }
+    drawMinimap() {
+        const mCanvas = document.getElementById('minimapCanvas'); const mCtx = mCanvas.getContext('2d');
+        if (!mCanvas) return;
+        mCtx.clearRect(0,0,150,150); mCtx.fillStyle = '#151c12'; mCtx.fillRect(0,0,150,150);
+        mCtx.fillStyle = '#2d251e'; mCtx.fillRect(0, 65, 150, 20);
+        let toM = (x, y) => ({ x: (x / 4000) * 150, y: (y / 900) * 150 });
+        let drawDots = (list, color, r) => {
+            mCtx.fillStyle = color;
+            for (let e of list) { if (e.isDead) continue; let pos = toM(e.x, e.y); mCtx.beginPath(); mCtx.arc(pos.x, pos.y, r, 0, Math.PI*2); mCtx.fill(); }
+        };
+        drawDots(game.towers.filter(t => t.team==='radiant'), '#00ff00', 3);
+        drawDots(game.towers.filter(t => t.team==='dire'), '#ff0000', 3);
+        drawDots(game.ancients.filter(a => a.team==='radiant'), '#00cc00', 5);
+        drawDots(game.ancients.filter(a => a.team==='dire'), '#cc0000', 5);
+        drawDots(game.creeps.filter(c => c.team==='radiant'), '#7cfc00', 1.5);
+        drawDots(game.creeps.filter(c => c.team==='dire'), '#8b008b', 1.5);
+        if (!game.playerHero.isDead) drawDots([game.playerHero], '#00ffff', 4);
+        if (!game.enemyHero.isDead) drawDots([game.enemyHero], '#ff00ff', 4);
+    }
+}
+
+// --- ЯДРО ДВИЖКА ИГРЫ ---
+class Game {
+    constructor() {
+        this.map = new GameMap(); this.camera = new Camera(this.map); this.uiManager = new UIManager();
+        this.playerHero = null; this.enemyHero = null; this.aiController = null;
+        this.creeps = []; this.towers = []; this.ancients = []; this.fountains = []; this.projectiles = [];
+        this.shrapnelZones = [];
+        this.effects = [];
+        this.matchTime = 0; this.creepTimer = 0; this.lastTime = performance.now();
+        this.globalSpeedMultiplier = 0.75; // уменьшает скорость передвижения всех юнитов
+        this.glyphCooldown = { radiant: 0, dire: 0 }; this.glyphMaxCooldown = 60;
+        this.glyphActive = { radiant: false, dire: false }; this.glyphDuration = 8; this.glyphTimer = { radiant: 0, dire: 0 };
+        this.glyphShieldReduction = 0.4;
+        this.waveNumber = 0;
+        this.bountyRunes = [
+            new BountyRune(220, 260),
+            new BountyRune(2980, 260)
+        ];
+        
+        this.initWorld(); this.initInput();
+    }
+    initWorld() {
+        this.ancients.push(new Ancient(180, this.map.laneY, 'radiant')); this.ancients.push(new Ancient(3020, this.map.laneY, 'dire'));
+        this.towers.push(new Tower(650, this.map.laneY, 'radiant')); this.towers.push(new Tower(1200, this.map.laneY, 'radiant'));
+        this.towers.push(new Tower(2550, this.map.laneY, 'dire')); this.towers.push(new Tower(2000, this.map.laneY, 'dire'));
+        this.fountains.push(new Fountain(40, this.map.laneY, 'radiant')); this.fountains.push(new Fountain(3160, this.map.laneY, 'dire'));
+    }
+    start(selectedHeroName) {
+        audio.init();
+        this.playerHero = this.createHero(selectedHeroName, 200, this.map.laneY, 'radiant');
+        const pool = ['Morphling', 'Warlock', 'Sniper'];
+        this.enemyHero = this.createHero(pool[Math.floor(Math.random() * pool.length)], 3000, this.map.laneY, 'dire');
+        this.aiController = new AIController(this.enemyHero);
+        document.getElementById('hero-selection').classList.add('hidden');
+        document.getElementById('game-screen').classList.remove('hidden');
+        this.lastTime = performance.now(); requestAnimationFrame((t) => this.loop(t));
+    }
+    createHero(name, x, y, team) {
+        if (name === 'Morphling') return new Morphling(x, y, team);
+        if (name === 'Warlock') return new Warlock(x, y, team);
+        return new Sniper(x, y, team);
+    }
+    radiantEntities() {
+        return [this.playerHero, ...this.creeps.filter(c => c.team==='radiant'), ...this.towers.filter(t => t.team==='radiant'), ...this.ancients.filter(a => a.team==='radiant')].filter(e => e && !e.isDead);
+    }
+    direEntities() {
+        return [this.enemyHero, ...this.creeps.filter(c => c.team==='dire'), ...this.towers.filter(t => t.team==='dire'), ...this.ancients.filter(a => a.team==='dire')].filter(e => e && !e.isDead);
+    }
+    spawnWave() {
+        this.waveNumber++;
+        for (let i = 0; i < 3; i++) {
+            this.creeps.push(new Creep(350 + i*10, this.map.laneY - 20 + i*15, 'radiant', 'melee'));
+            this.creeps.push(new Creep(2850 - i*10, this.map.laneY - 20 + i*15, 'dire', 'melee'));
+        }
+        this.creeps.push(new Creep(320, this.map.laneY, 'radiant', 'ranged'));
+        this.creeps.push(new Creep(2880, this.map.laneY, 'dire', 'ranged'));
+
+        // Каждые 3 волны — катапульты
+        if (this.waveNumber % 3 === 0) {
+            // Radiant
+            this.creeps.push(new Catapult(350, 470, 'radiant'));
+
+            // Dire
+            this.creeps.push(new Catapult(3650, 470, 'dire'));
+        }
+        
+    }
+    initInput() {
+        canvas.addEventListener('mousedown', (e) => {
+            if (e.button !== 2) return; 
+            e.preventDefault();
+            audio.init();
+
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
+            const mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
+            
+            const wx = mouseX + this.camera.x;
+            const wy = mouseY + this.camera.y;
+
+            if (this.bountyRunes) {
+                for (let rune of this.bountyRunes) {
+                    if (rune.isClicked(wx, wy)) {
+                        const distToRune = Math.hypot(this.playerHero.x - rune.x, this.playerHero.y - rune.y);
+                        if (distToRune <= 100) {
+                            rune.pickup(this.playerHero);
+                        } else {
+                            this.playerHero.setMoveTarget(rune.x, rune.y);
+                        }
+                        return;
+                    }
+                }
+            }
+
+            let enemies = this.playerHero.team === 'radiant' ? this.direEntities() : this.radiantEntities();
+            let clickedEnemy = null;
+            for (let ent of enemies) {
+                if (Math.hypot(ent.x - wx, ent.y - wy) < ent.radius + 20) {
+                    clickedEnemy = ent;
+                    break;
+                }
+            }
+
+            if (clickedEnemy) {
+                this.playerHero.attackTarget = clickedEnemy;
+            } else {
+                this.playerHero.attackTarget = null;
+                this.playerHero.moveTo(wx, wy);
+                this.uiManager.addFloatingText(wx, wy, "➔", '#00ff00');
+            }
+        });
+
+        window.addEventListener('keydown', (e) => {
+            const k = e.key.toLowerCase();
+            if (k === 'q' || k === 'й') this.playerHero.useAbility(0);
+            if (k === 'w' || k === 'ц') this.playerHero.useAbility(1);
+            if (k === 'e' || k === 'у') this.playerHero.useAbility(2); 
+            if (k === 'r' || k === 'к') this.playerHero.useAbility(3); 
+            if (k === 'p' || k === 'з') this.toggleShop();
+            if (k === 'g' || k === 'п') this.activateGlyph();
+        });
+        document.getElementById('open-shop-btn').addEventListener('click', () => this.toggleShop());
+        document.getElementById('glyph-btn')?.addEventListener('click', () => this.activateGlyph());
+        document.getElementById('close-shop-btn').addEventListener('click', () => this.toggleShop());
+        document.querySelectorAll('.shop-item').forEach(el => {
+            el.addEventListener('click', () => this.buyItem(el.getAttribute('data-item')));
+        });
+    }
+    toggleShop() { document.getElementById('shop-modal').classList.toggle('hidden'); }
+    activateGlyph() { this.activateGlyphForTeam(this.playerHero?.team); }
+    activateGlyphForTeam(team) {
+        if (!team || this.glyphCooldown[team] > 0 || this.glyphActive[team]) return false;
+        this.glyphActive[team] = true;
+        this.glyphTimer[team] = this.glyphDuration;
+        this.glyphCooldown[team] = this.glyphMaxCooldown;
+        for (let tower of this.towers) {
+            if (tower.team === team && !tower.isDead) {
+                tower.glyphActive = true;
+                tower.glyphTimer = this.glyphDuration;
+            }
+        }
+        audio.play('ability');
+        let heroForText = team === this.playerHero?.team ? this.playerHero : this.enemyHero;
+        if (heroForText && !heroForText.isDead) {
+            this.uiManager.addFloatingText(heroForText.x, heroForText.y - 40, 'Glyph activated', '#7dd3fc');
+        }
+        return true;
+    }
+    buyItem(type) {
+        let p = this.playerHero; let it = null;
+        if (type === 'boots') it = new Item('boots', 'Boots', 500, { speedBonus: 0.2 });
+        if (type === 'sword') it = new Item('sword', 'Crystal', 1000, { damageBonus: 25 });
+        if (type === 'orb') it = new Item('orb', 'Vitality', 1200, { hpBonus: 300 });
+        if (type === 'vladmir') it = new Item('vladmir', "Vladmir's Offering", 2200, { manaRegenBonus: 0.75, armorBonus: 1 });
+        if (type === 'linkens') it = new Item('linkens', "Linken's Sphere", 4800, { hp: 200, mana: 200, damage: 15, manaRegen: 5 });
+        if (it && p.gold >= it.cost && p.inventory.addItem(it)) { 
+            p.gold -= it.cost; audio.play('buy');
+            if (it.id === 'vladmir') { p.hasVladmir = true; }
+            if (it.id === 'linkens') { p.hasLinkens = true; p.linkensCooldown = 0; }
+        }
+    }
+    loop(time) {
+        let dt = (time - this.lastTime) / 1000; this.lastTime = time;
+        if (dt > 0.1) dt = 0.1; this.update(dt); this.render();
+        requestAnimationFrame((t) => this.loop(t));
+    }
+    update(dt) {
+        this.matchTime += dt; this.creepTimer += dt;
+        for (let team of ['radiant', 'dire']) {
+            if (this.glyphCooldown[team] > 0) {
+                this.glyphCooldown[team] = Math.max(0, this.glyphCooldown[team] - dt);
+            }
+            if (this.glyphActive[team]) {
+                this.glyphTimer[team] -= dt;
+                if (this.glyphTimer[team] <= 0) {
+                    this.glyphActive[team] = false;
+                    this.glyphTimer[team] = 0;
+                }
+            }
+        }
+        if (this.creepTimer >= 30 || this.matchTime === dt) { this.spawnWave(); this.creepTimer = 0; }
+        this.playerHero.update(dt); this.enemyHero.update(dt); this.aiController.update(dt);
+        for (let i = this.creeps.length - 1; i >= 0; i--) { if (this.creeps[i].isDead) this.creeps.splice(i, 1); else this.creeps[i].update(dt); }
+        for (let t of this.towers) t.update(dt);
+        if (this.bountyRunes) {
+            for (let rune of this.bountyRunes) rune.update(dt);
+        }
+        for (let f of this.fountains) f.update(dt);
+        for (let i = this.projectiles.length - 1; i >= 0; i--) { if (this.projectiles[i].update(dt)) this.projectiles.splice(i, 1); }
+        
+        for (let i = this.shrapnelZones.length - 1; i >= 0; i--) {
+            if (this.shrapnelZones[i].update(dt)) this.shrapnelZones.splice(i, 1);
+        }
+
+        for (let i = this.effects.length - 1; i >= 0; i--) {
+            this.effects[i].life -= dt;
+            if (this.effects[i].life <= 0) this.effects.splice(i, 1);
+        }
+        
+        this.camera.update(this.playerHero.x, this.playerHero.y); this.uiManager.update(dt);
+    }
+    render() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height); this.map.draw(ctx, this.camera);
+        
+        for (let zone of this.shrapnelZones) zone.draw(ctx, this.camera);
+        
+        for (let f of this.fountains) f.draw(ctx, this.camera);
+        for (let t of this.towers) t.draw(ctx, this.camera);
+        if (this.bountyRunes) {
+            for (let rune of this.bountyRunes) rune.draw(ctx, this.camera);
+        }
+        for (let a of this.ancients) a.draw(ctx, this.camera);
+        for (let c of this.creeps) c.draw(ctx, this.camera);
+        this.playerHero.draw(ctx, this.camera); this.enemyHero.draw(ctx, this.camera);
+        for (let p of this.projectiles) p.draw(ctx, this.camera);
+        for (let e of this.effects) {
+            if (e.type === 'linkens') {
+                ctx.save();
+                ctx.strokeStyle = "#66ccff";
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.arc(e.x - this.camera.x, e.y - this.camera.y, 35, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+        this.uiManager.draw(ctx, this.camera);
+    }
+    endGame(wonTeam) {
+        document.getElementById('game-screen').classList.add('hidden');
+        let scr = document.getElementById('end-screen'); let title = document.getElementById('end-title');
+        scr.classList.remove('hidden');
+        if (wonTeam === this.playerHero.team) { title.innerText = "ПОБЕДА"; title.style.color = "#00ff00"; audio.play('victory'); }
+        else { title.innerText = "ПОРАЖЕНИЕ"; title.style.color = "#ff0000"; audio.play('defeat'); }
+    }
+}
+
+const game = new Game();
+document.querySelectorAll('.hero-card').forEach(card => {
+    card.addEventListener('click', () => game.start(card.getAttribute('data-hero')));
+});
