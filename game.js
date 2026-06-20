@@ -189,23 +189,58 @@ class Item {
 
 class Inventory {
     constructor(owner) { this.owner = owner; this.slots = new Array(6).fill(null); }
+    get items() { return this.slots.filter(Boolean); }
     addItem(item) {
         for (let i = 0; i < 6; i++) {
             if (this.slots[i] === null) {
                 this.slots[i] = item;
-                if (item.stats.speedBonus) this.owner.speed *= (1 + item.stats.speedBonus);
-                if (item.stats.damageBonus) this.owner.damage += item.stats.damageBonus;
-                if (item.stats.damage) this.owner.damage += item.stats.damage;
-                if (item.stats.hpBonus) { this.owner.maxHp += item.stats.hpBonus; this.owner.hp += item.stats.hpBonus; }
-                if (item.stats.hp) { this.owner.maxHp += item.stats.hp; this.owner.hp += item.stats.hp; }
-                if (item.stats.mana) { this.owner.maxMp += item.stats.mana; this.owner.mp += item.stats.mana; }
-                if (item.stats.manaRegen) this.owner.inventoryManaRegen = (this.owner.inventoryManaRegen || 0) + item.stats.manaRegen;
-                if (item.stats.manaRegenBonus) this.owner.inventoryManaRegen = (this.owner.inventoryManaRegen || 0) + item.stats.manaRegenBonus;
-                if (item.stats.armorBonus) this.owner.armor = (this.owner.armor || 0) + item.stats.armorBonus;
+                this.applyItemStats(item, 1);
+                this.combineVanguardPairs();
                 return true;
             }
+        } 
+        return false; 
+    }
+    combineVanguardPairs() {
+        let ringSlot = this.slots.findIndex(i => i && i.id === 'ringhealth');
+        let vitalitySlot = this.slots.findIndex(i => i && i.id === 'vitality');
+
+        if (ringSlot !== -1 && vitalitySlot !== -1) {
+            const combineSlot = Math.min(ringSlot, vitalitySlot);
+            const removeSlot = Math.max(ringSlot, vitalitySlot);
+
+            this.removeItemAt(removeSlot);
+            this.removeItemAt(combineSlot);
+
+            const vanguard = new Item('vanguard', 'Vanguard', 0, {
+                hp: 250,
+                hpRegen: 4.5,
+                damageBlock: true
+            });
+            this.slots[combineSlot] = vanguard;
+            this.applyItemStats(vanguard, 1);
+            if (game && game.uiManager) {
+                game.uiManager.addFloatingText(this.owner.x, this.owner.y - 30, 'VANGUARD!', '#ffd700');
+            }
         }
-        return false;
+    }
+    applyItemStats(item, factor = 1) {
+        if (item.stats.speedBonus) this.owner.speed *= factor === 1 ? (1 + item.stats.speedBonus) : 1 / (1 + item.stats.speedBonus);
+        if (item.stats.damageBonus) this.owner.damage += item.stats.damageBonus * factor;
+        if (item.stats.damage) this.owner.damage += item.stats.damage * factor;
+        if (item.stats.hpBonus) { this.owner.maxHp += item.stats.hpBonus * factor; this.owner.hp += item.stats.hpBonus * factor; }
+        if (item.stats.hp) { this.owner.maxHp += item.stats.hp * factor; this.owner.hp += item.stats.hp * factor; }
+        if (item.stats.mana) { this.owner.maxMp += item.stats.mana * factor; this.owner.mp += item.stats.mana * factor; }
+        if (item.stats.manaRegen) this.owner.inventoryManaRegen = (this.owner.inventoryManaRegen || 0) + item.stats.manaRegen * factor;
+        if (item.stats.manaRegenBonus) this.owner.inventoryManaRegen = (this.owner.inventoryManaRegen || 0) + item.stats.manaRegenBonus * factor;
+        if (item.stats.hpRegen) this.owner.inventoryHpRegen = (this.owner.inventoryHpRegen || 0) + item.stats.hpRegen * factor;
+        if (item.stats.armorBonus) this.owner.armor = (this.owner.armor || 0) + item.stats.armorBonus * factor;
+    }
+    removeItemAt(index) {
+        const item = this.slots[index];
+        if (!item) return;
+        this.applyItemStats(item, -1);
+        this.slots[index] = null;
     }
 }
 
@@ -219,9 +254,34 @@ class Entity {
         this.attackRange = 100; this.isDead = false; this.facing = 1; this.slowTimer = 0;
         this.headshotSlowTimer = 0;
         this.hitEffectTimer = 0;
+        this.nasalGooEffects = [];
+        this.quillStacks = [];
     }
     takeDamage(amount, attacker) {
         if (this.isDead) return;
+
+        if (this.inventory) {
+            let vanguard = this.inventory.items.find(i => i.id === 'vanguard');
+            if (vanguard) {
+                let blockChance = 0.6;
+                if (Math.random() < blockChance) {
+                    let blockAmount = this instanceof Bristleback ? 50 : 25;
+                    amount = Math.max(0, amount - blockAmount);
+                    game.uiManager.addFloatingText(this.x, this.y - 25, 'BLOCK', '#bbbbbb');
+                }
+            }
+        }
+
+        let armorDebuff = 0;
+        if (this.nasalGooEffects && this.nasalGooEffects.length > 0) {
+            armorDebuff = this.nasalGooEffects.reduce((sum, effect) => sum + effect.armor, 0);
+        }
+
+        let armorValue = (this.armor || 0) + (this.armorBonusAura || 0) - armorDebuff;
+        armorValue = Math.max(armorValue, -50);
+        let reduction = armorValue >= 0 ? armorValue / (armorValue + 100) : armorValue * 0.01;
+        amount = Math.max(1, amount * (1 - reduction));
+
         this.hp -= amount;
         game.uiManager.addFloatingText(this.x, this.y - 20, Math.floor(amount), '#ff4400');
         if (this.hp <= 0) { this.hp = 0; this.isDead = true; this.onDeath(attacker); }
@@ -234,9 +294,33 @@ class Entity {
         if (this.headshotSlowTimer > 0) this.headshotSlowTimer -= dt;
         if (this.hitEffectTimer > 0) this.hitEffectTimer -= dt;
 
+        if (this.nasalGooEffects && this.nasalGooEffects.length > 0) {
+            let totalSlow = 0;
+            this.nasalGooEffects = this.nasalGooEffects.filter(effect => {
+                effect.remaining -= dt;
+                if (effect.remaining > 0) {
+                    totalSlow += effect.slow;
+                    return true;
+                }
+                return false;
+            });
+            this.slowTimer = this.slowTimer; // keep existing slow behavior separate
+            this._nasalGooSlow = Math.min(0.65, totalSlow);
+        } else {
+            this._nasalGooSlow = 0;
+        }
+
+        if (this.quillStacks && this.quillStacks.length > 0) {
+            this.quillStacks = this.quillStacks.filter(stack => {
+                stack.remaining -= dt;
+                return stack.remaining > 0;
+            });
+        }
+
         let currentSlow = 1.0;
         if (this.slowTimer > 0) { this.slowTimer -= dt; currentSlow *= 0.5; }
-        if (this.headshotSlowTimer > 0) currentSlow *= 0.6; 
+        if (this.headshotSlowTimer > 0) currentSlow *= 0.6;
+        if (this._nasalGooSlow) currentSlow *= Math.max(0.1, 1 - this._nasalGooSlow);
 
         if (window.game && game.shrapnelZones) {
             for (let zone of game.shrapnelZones) {
@@ -302,11 +386,13 @@ class Hero extends Entity {
     constructor(x, y, team, name) {
         super(x, y, team, 22, 600, 54, 295);
         this.name = name; this.level = 1; this.xp = 0; this.maxXp = 100;
-        this.mp = 300; this.maxMp = 300; this.gold = 100;
+        this.mp = 300; this.maxMp = 300; this.gold = 100;            // МНОГО ЗОЛОТА НА СТАРТЕ ДЛЯ ТЕСТОВ
         this.inventory = new Inventory(this); this.abilities = [];
         this.hpRegenBase = 2.0; this.mpRegenBase = 1.5; this.invulnerable = false;
+        this.inventoryHpRegen = 0; this.inventoryManaRegen = 0;
+        this.isHealingAtFountain = false;
     }
-    getHpRegen() { return this.hpRegenBase; }
+    getHpRegen() { return this.hpRegenBase + (this.inventoryHpRegen || 0); }
     getMpRegen() {
         return this.mpRegenBase + (this.mpRegenAura || 0) + (this.inventoryManaRegen || 0);
     }
@@ -315,13 +401,13 @@ class Hero extends Entity {
 
         // Награда за убийство героя
         if (attacker instanceof Hero) {
-            attacker.gold += 200;
+            attacker.gold += 300;
 
             if (attacker === game.playerHero) {
                 game.uiManager.addFloatingText(
                     this.x,
                     this.y - 30,
-                    "+200 🪙 HERO KILL",
+                    "+300 🪙 HERO KILL",
                     "#ffd700"
                 );
             }
@@ -336,7 +422,7 @@ class Hero extends Entity {
                 this.shrapnelChargeRegenTimer = 0;
                 this.aimTimer = 0;
                 this.assChannel = 0;
-                this.assTarget = null;
+                this.assTarget = null; 
             }
         }, 5000);
     }
@@ -413,7 +499,20 @@ class Hero extends Entity {
         this.attackCooldown = this.attackSpeed; audio.play('attack');
         let finalDamage = this.damage;
         if (this.vladmirAura) finalDamage *= 1.18;
-        game.projectiles.push(new Projectile(this.x, this.y, this.attackTarget, finalDamage, this.team, this));
+
+        let critChance = 0;
+        let critMultiplier = 1;
+        for (let item of this.inventory.items) {
+            if (item.stats?.critChance) critChance = Math.max(critChance, item.stats.critChance);
+            if (item.stats?.critMultiplier) critMultiplier = Math.max(critMultiplier, item.stats.critMultiplier);
+        }
+
+        let proj = new Projectile(this.x, this.y, this.attackTarget, finalDamage, this.team, this);
+        if (Math.random() < critChance) {
+            proj.isCrit = true;
+            proj.damage = Math.max(1, proj.damage * critMultiplier);
+        }
+        game.projectiles.push(proj);
     }
     draw(ctx, camera) {
         if (this.isDead) return;
@@ -539,28 +638,51 @@ class Morphling extends Hero {
         if (this.isShiftingAgility && this.baseStrength > this.minStatLimit) {
             this.baseStrength--;
             this.baseAgility++;
-            this.recalculateStats(-1);
+            this.recalculateStats();
         } else if (this.isShiftingStrength && this.baseAgility > this.minStatLimit) {
             this.baseAgility--;
             this.baseStrength++;
-            this.recalculateStats(1);
+            this.recalculateStats();
         }
     }
 
-    recalculateStats(hpDirection) {
-        let hpPercentage = this.hp / this.maxHp;
+    recalculateStats() {
+        // сохраняем текущий процент здоровья
+        let hpPercent = this.hp / this.maxHp;
+
+        // новое максимальное здоровье
+        let oldMaxHp = this.maxHp;
         this.maxHp = this.morphBaseHp + (this.baseStrength - 22) * 20;
-        this.hp = Math.max(1, this.maxHp * hpPercentage);
+
+        // здоровье меняется пропорционально
+        // пример: 10/100 -> 20/200
+        this.hp = Math.max(1, this.maxHp * hpPercent);
+
+        // остальные характеристики
         this.damage = this.morphBaseDamage + (this.baseAgility - 24);
         this.attackRange = 230 + (this.baseAgility - 24) * 5;
+
         let agilityBonus = (this.baseAgility - 24) * 0.01;
-        this.attackSpeed = Math.max(0.3, 1.2 / (1 + agilityBonus));
+        this.attackSpeed = Math.max(
+            0.3,
+            1.2 / (1 + agilityBonus)
+        );
 
         if (game.playerHero === this) {
             if (this.isShiftingAgility) {
-                game.uiManager.addFloatingText(this.x, this.y - 30, "+AGI", '#00ffcc');
+                game.uiManager.addFloatingText(
+                    this.x,
+                    this.y - 30,
+                    "+AGI",
+                    "#00ffcc"
+                );
             } else if (this.isShiftingStrength) {
-                game.uiManager.addFloatingText(this.x, this.y - 30, "+STR", '#ff3333');
+                game.uiManager.addFloatingText(
+                    this.x,
+                    this.y - 30,
+                    "+STR",
+                    "#ff3333"
+                );
             }
         }
     }
@@ -898,6 +1020,184 @@ class Warlock extends Hero {
         });
 
         super.draw(ctx, camera);
+    }
+}
+
+class Bristleback extends Hero {
+    constructor(x, y, team) {
+        super(x, y, team, 'Bristleback');
+        this.maxHp = 800; this.hp = 800;
+        this.damage = 58;
+        this.baseSpeed = 280; this.speed = 280;
+        this.attackRange = 120;
+
+        this.abilities.push(new Ability('Viscous Nasal Goo', 'active', 2, 20, 'Fires goo at a target, slowing movement and reducing armor for 5 sec. Effects stack and refresh on each cast.'));
+        this.abilities.push(new Ability('Quill Spray', 'active', 3, 25, 'Fires quills in a radius, damaging enemies. Additional damage scales with recent Quill hits.'));
+        this.abilities.push(new Ability('Bristleback', 'passive', 0, 0, 'Reduces damage from attacks to the back and sides. Enough back damage triggers a Quill Spray.'));
+        this.abilities.push(new Ability('Warpath', 'passive', 0, 0, 'Gains stacks when casting abilities, increasing damage and movement speed for a limited time.'));
+
+        this.nasalGooEffects = [];
+        this.backDamageAccumulator = 0;
+        this.warpathStacks = [];
+        this.warpathMaxStacks = 8;
+        this.warpathDuration = 16.0;
+        this.quillStackDuration = 5.0;
+        this.quillRadius = 500;
+        this.quillTriggerThreshold = 275;
+        this.bristlebackDamageReduction = 0.24;
+        this.quillSprayTimer = 0;
+        this.quillSprayDuration = 0.25;
+    }
+
+    getAbilityRank() {
+        return Math.min(3, Math.floor((this.level - 1) / 2));
+    }
+
+    getNasalGooValues() {
+        const slowValues = [0.03, 0.06, 0.09, 0.12];
+        const armorValues = [3, 6, 9, 12];
+        const rank = this.getAbilityRank();
+        return { slow: slowValues[rank], armor: armorValues[rank] };
+    }
+
+    getQuillDamageBonusPerStack() {
+        return 8;
+    }
+
+    getWarpathDamageBonus() {
+        return 12 * this.warpathStacks.length;
+    }
+
+    getWarpathSpeedMultiplier() {
+        return 1 + 0.02 * this.warpathStacks.length;
+    }
+
+    addWarpathStack() {
+        if (this.warpathStacks.length >= this.warpathMaxStacks) {
+            this.warpathStacks.shift();
+        }
+        this.warpathStacks.push({ remaining: this.warpathDuration });
+    }
+
+    applyNasalGoo(target) {
+        if (!target || target.isDead) return;
+        const values = this.getNasalGooValues();
+        if (!target.nasalGooEffects) target.nasalGooEffects = [];
+        target.nasalGooEffects.forEach(effect => { effect.remaining = 5.0; });
+        target.nasalGooEffects.push({ remaining: 5.0, slow: values.slow, armor: values.armor });
+        game.uiManager.addFloatingText(target.x, target.y - 30, 'GOO', '#00ffff');
+    }
+
+    castQuillSpray(triggered = false) {
+        const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+        const baseDamage = 25;
+        let hitAny = false;
+        this.quillSprayTimer = this.quillSprayDuration;
+
+        for (let e of enemies) {
+            if (e.isDead) continue;
+            if (Math.hypot(e.x - this.x, e.y - this.y) <= this.quillRadius) {
+                const stackCount = (e.quillStacks || []).length;
+                const damage = baseDamage + stackCount * this.getQuillDamageBonusPerStack();
+                e.takeDamage(damage, this);
+                if (!e.quillStacks) e.quillStacks = [];
+                e.quillStacks = e.quillStacks.filter(stack => stack.remaining > 0);
+                e.quillStacks.push({ remaining: this.quillStackDuration });
+                if (!triggered) game.uiManager.addFloatingText(e.x, e.y - 25, `-${Math.floor(damage)}`, '#ffd700');
+                hitAny = true;
+            }
+        }
+
+        if (hitAny) audio.play('ability');
+    }
+
+    isAttackFromBackOrSide(attacker) {
+        if (!attacker) return false;
+        const dx = attacker.x - this.x;
+        const dy = attacker.y - this.y;
+        const angle = Math.atan2(dy, dx);
+        const forwardAngle = this.facing === 1 ? 0 : Math.PI;
+        let diff = Math.abs(((angle - forwardAngle + Math.PI) % (2 * Math.PI)) - Math.PI);
+        return diff > Math.PI / 4;
+    }
+
+    useAbility(idx) {
+        if (this.isDead) return;
+
+        if (idx === 0) {
+            const ab = this.abilities[0];
+            let target = this.attackTarget;
+            if (!target || target.team === this.team || target.isDead) {
+                const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+                target = enemies.find(e => Math.hypot(e.x - this.x, e.y - this.y) <= 500);
+            }
+            if (!target || target.isDead) return;
+            if (ab.trigger(this)) {
+                this.applyNasalGoo(target);
+                this.addWarpathStack();
+            }
+        } else if (idx === 1) {
+            const ab = this.abilities[1];
+            if (ab.trigger(this)) {
+                this.castQuillSpray();
+                this.addWarpathStack();
+            }
+        }
+    }
+
+    update(dt) {
+        if (this.warpathStacks.length > 0) {
+            this.warpathStacks = this.warpathStacks.filter(stack => {
+                stack.remaining -= dt;
+                return stack.remaining > 0;
+            });
+        }
+        if (this.quillSprayTimer > 0) {
+            this.quillSprayTimer -= dt;
+            if (this.quillSprayTimer < 0) this.quillSprayTimer = 0;
+        }
+        super.update(dt);
+    }
+
+    updateMovement(dt) {
+        super.updateMovement(dt);
+        this.speed *= this.getWarpathSpeedMultiplier();
+    }
+
+    performAttack() {
+        this.attackCooldown = this.attackSpeed;
+        audio.play('attack');
+        let finalDamage = this.damage + this.getWarpathDamageBonus();
+        if (this.vladmirAura) finalDamage *= 1.18;
+        game.projectiles.push(new Projectile(this.x, this.y, this.attackTarget, finalDamage, this.team, this));
+    }
+
+    takeDamage(amount, attacker) {
+        if (this.isDead) return;
+        let actualAmount = amount;
+
+        if (attacker && attacker.team !== this.team && this.isAttackFromBackOrSide(attacker)) {
+            actualAmount = actualAmount * (1 - this.bristlebackDamageReduction);
+            this.backDamageAccumulator += actualAmount;
+            if (this.backDamageAccumulator >= this.quillTriggerThreshold) {
+                this.backDamageAccumulator -= this.quillTriggerThreshold;
+                this.castQuillSpray(true);
+            }
+        }
+
+        super.takeDamage(actualAmount, attacker);
+    }
+
+    draw(ctx, camera) {
+        super.draw(ctx, camera);
+        if (this.quillSprayTimer > 0 && !this.isDead) {
+            let sx = this.x - camera.x; let sy = this.y - camera.y;
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.arc(sx, sy, this.quillRadius / 8, 0, Math.PI * 2); ctx.stroke();
+            ctx.restore();
+        }
     }
 }
 
@@ -1451,6 +1751,7 @@ class Projectile {
     constructor(x, y, target, damage, team, attacker) {
         this.x = x; this.y = y; this.target = target; this.damage = damage; this.team = team; this.attacker = attacker;
         this.speed = 500; this.radius = 5; this.isHs = false; this.isAss = false;
+        this.isCrit = false;
     }
     update(dt) {
         if (!this.target || this.target.isDead) return true;
@@ -1474,6 +1775,9 @@ class Projectile {
                 }
                 
                 game.uiManager.addFloatingText(this.target.x, this.target.y - 30, "HEADSHOT", '#ffa500');
+            }
+            if (this.isCrit) {
+                game.uiManager.addFloatingText(this.target.x, this.target.y - 45, "CRIT!", '#ff0000');
             }
             this.target.takeDamage(this.damage, this.attacker);
             // Vampirism from Vladmir's Offering
@@ -1633,17 +1937,22 @@ class AIController {
         // --- ЕСЛИ РУНЫ НЕТ ИЛИ ОНА ПОДОБРАНА, ИДЕМ ПО ДЕЛАМ ---
         
         // Отступление на базу при критическом уровне здоровья
-        if (this.hero.hp / this.hero.maxHp < 0.3) {
-            this.hero.attackTarget = null; 
-            this.hero.moveTo(this.hero.team === 'radiant' ? 40 : 3160, game.map.laneY); 
-            
-            if (this.hero instanceof Morphling) {
-                if (!this.hero.isShiftingStrength && this.hero.baseAgility > this.hero.minStatLimit) {
-                    this.hero.useAbility(3); 
-                }
+        if (this.hero.hp / this.hero.maxHp < 0.3 || this.hero.isHealingAtFountain) {
+            this.hero.attackTarget = null;
+            this.hero.isHealingAtFountain = true;
+            this.hero.moveTo(
+                this.hero.team === 'radiant' ? 40 : 3160,
+                game.map.laneY
+            );
+
+            if (this.hero.hp >= this.hero.maxHp) {
+                this.hero.hp = this.hero.maxHp;
+                this.hero.isHealingAtFountain = false;
             }
+
             return;
         }
+        this.hero.isHealingAtFountain = false;
 
         // Bot glyph usage when an allied tower is under attack and glyph is available
         let alliedTowers = game.towers.filter(t => t.team === this.hero.team && !t.isDead);
@@ -1776,6 +2085,21 @@ class AIController {
                 }
             }
         }
+        else if (this.hero instanceof Bristleback) {
+            if (this.hero.abilities[0].currentCooldown === 0 && this.hero.mp >= this.hero.abilities[0].manaCost) {
+                let target = enemies.find(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) <= 500);
+                if (target) {
+                    this.hero.attackTarget = target;
+                    this.hero.useAbility(0);
+                }
+            }
+            if (this.hero.abilities[1].currentCooldown === 0 && this.hero.mp >= this.hero.abilities[1].manaCost) {
+                let targetCount = enemies.filter(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) <= 500).length;
+                if (targetCount >= 2 || this.hero.hp / this.hero.maxHp < 0.5) {
+                    this.hero.useAbility(1);
+                }
+            }
+        }
 
         // Стандартный поиск ближайшей цели для атаки / пуша линии
         let target = null; 
@@ -1794,9 +2118,9 @@ class AIController {
     }
 
     buyLogic() {
-        if (this.hero.gold >= 1000) {
-            let i = new Item('sword', 'Crystal Sword', 1000, { damageBonus: 25 });
-            if (this.hero.inventory.addItem(i)) this.hero.gold -= 1000;
+        if (this.hero.gold >= 1500) {
+            let i = new Item('sword', 'Crystalys', 1500, { damageBonus: 32, critChance: 0.3, critMultiplier: 1.6 });
+            if (this.hero.inventory.addItem(i)) this.hero.gold -= 1500;
         }
     }
 }
@@ -1842,6 +2166,9 @@ class UIManager {
                 } else if (heroKey === 'Warlock') {
                     profileIcon.src = 'images/warlock_profile.webp';
                     profileIcon.alt = 'Warlock profile';
+                } else if (heroKey === 'Bristleback') {
+                    profileIcon.src = 'images/Bristleback_icon.svg';
+                    profileIcon.alt = 'Bristleback profile';
                 } else {
                     profileIcon.src = '';
                     profileIcon.alt = '';
@@ -1984,7 +2311,7 @@ class Game {
     start(selectedHeroName) {
         audio.init();
         this.playerHero = this.createHero(selectedHeroName, 200, this.map.laneY, 'radiant');
-        const pool = ['Morphling', 'Warlock', 'Sniper'];
+        const pool = ['Morphling', 'Warlock', 'Sniper', 'Bristleback'];
         this.enemyHero = this.createHero(pool[Math.floor(Math.random() * pool.length)], 3000, this.map.laneY, 'dire');
         this.aiController = new AIController(this.enemyHero);
         document.getElementById('hero-selection').classList.add('hidden');
@@ -1994,6 +2321,7 @@ class Game {
     createHero(name, x, y, team) {
         if (name === 'Morphling') return new Morphling(x, y, team);
         if (name === 'Warlock') return new Warlock(x, y, team);
+        if (name === 'Bristleback') return new Bristleback(x, y, team);
         return new Sniper(x, y, team);
     }
     radiantEntities() {
@@ -2104,11 +2432,12 @@ class Game {
     }
     buyItem(type) {
         let p = this.playerHero; let it = null;
-        if (type === 'boots') it = new Item('boots', 'Boots', 500, { speedBonus: 0.2 });
-        if (type === 'sword') it = new Item('sword', 'Crystal', 1000, { damageBonus: 25 });
-        if (type === 'orb') it = new Item('orb', 'Vitality', 1200, { hpBonus: 300 });
-        if (type === 'vladmir') it = new Item('vladmir', "Vladmir's Offering", 2200, { manaRegenBonus: 0.75, armorBonus: 1 });
-        if (type === 'linkens') it = new Item('linkens', "Linken's Sphere", 4800, { hp: 200, mana: 200, damage: 15, manaRegen: 5 });
+        if (type === 'boots') it = new Item('boots', 'Boots of Speed', 500, { speedBonus: 30 });
+        if (type === 'sword') it = new Item('sword', 'Crystalys', 1500, { damageBonus: 32, critChance: 0.3, critMultiplier: 1.6 });
+        if (type === 'vitality') it = new Item('vitality', 'Vitality Booster', 1000, { hp: 250 });
+        if (type === 'ringhealth') it = new Item('ringhealth', 'Ring of Health', 400, { hpRegen: 4.5 });
+        if (type === 'vladmir') it = new Item('vladmir', "Vladmir's Offering", 1500, { manaRegen: 0.75, armorBonus: 1 });
+        if (type === 'linkens') it = new Item('linkens', "Linken's Sphere", 1500, { hp: 200, mana: 200, damage: 15, manaRegen: 5 });
         if (it && p.gold >= it.cost && p.inventory.addItem(it)) { 
             p.gold -= it.cost; audio.play('buy');
             if (it.id === 'vladmir') { p.hasVladmir = true; }

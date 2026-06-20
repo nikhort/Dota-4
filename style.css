@@ -97,6 +97,13 @@ body, html {
     background-color: #3a2200;
     border-color: #ffa500; 
 }
+.hero-avatar.bristleback {
+    background-image: url('images/Bristleback_icon.svg');
+    background-size: cover;
+    background-position: center;
+    background-color: #4d3f1e;
+    border-color: #f9d342;
+}
 
 .hero-card h2 {
     margin-bottom: 10px;
