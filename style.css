@@ -104,6 +104,18 @@ body, html {
     background-color: #4d3f1e;
     border-color: #f9d342;
 }
+.hero-avatar.huskar {
+    background-image: url('images/Huskar_icon.webp');
+    background-size: cover;
+    background-position: center;
+    background-color: #7a1c00;
+    border-color: #ff8c00;
+}
+
+.autocast-active {
+    border: 2px solid #ffaa00 !important;
+    box-shadow: 0 0 10px #ffaa00, inset 0 0 10px rgba(255, 170, 0, 0.5);
+}
 
 .hero-card h2 {
     margin-bottom: 10px;

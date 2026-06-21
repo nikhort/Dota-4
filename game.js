@@ -254,13 +254,17 @@ class Entity {
         this.attackRange = 100; this.isDead = false; this.facing = 1; this.slowTimer = 0;
         this.headshotSlowTimer = 0;
         this.hitEffectTimer = 0;
+        this.silenceTimer = 0;
+        this.lifeBreakSlowTimer = 0;
+        this.magicResistance = 0;
+        this.burningSpears = [];
         this.nasalGooEffects = [];
         this.quillStacks = [];
     }
-    takeDamage(amount, attacker) {
+    takeDamage(amount, attacker, isFb = false, damageType = 'physical') {
         if (this.isDead) return;
 
-        if (this.inventory) {
+        if (damageType !== 'magic' && this.inventory) {
             let vanguard = this.inventory.items.find(i => i.id === 'vanguard');
             if (vanguard) {
                 let blockChance = 0.6;
@@ -272,19 +276,39 @@ class Entity {
             }
         }
 
-        let armorDebuff = 0;
-        if (this.nasalGooEffects && this.nasalGooEffects.length > 0) {
-            armorDebuff = this.nasalGooEffects.reduce((sum, effect) => sum + effect.armor, 0);
+        if (damageType === 'magic') {
+            amount *= Math.max(0, 1 - (this.magicResistance || 0));
+        } else {
+            let armorDebuff = 0;
+            if (this.nasalGooEffects && this.nasalGooEffects.length > 0) {
+                armorDebuff = this.nasalGooEffects.reduce((sum, effect) => sum + effect.armor, 0);
+            }
+            let armorValue = (this.armor || 0) + (this.armorBonusAura || 0) - armorDebuff;
+            armorValue = Math.max(armorValue, -50);
+            let reduction = armorValue >= 0 ? armorValue / (armorValue + 100) : armorValue * 0.01;
+            amount = Math.max(1, amount * (1 - reduction));
         }
 
-        let armorValue = (this.armor || 0) + (this.armorBonusAura || 0) - armorDebuff;
-        armorValue = Math.max(armorValue, -50);
-        let reduction = armorValue >= 0 ? armorValue / (armorValue + 100) : armorValue * 0.01;
-        amount = Math.max(1, amount * (1 - reduction));
-
         this.hp -= amount;
-        game.uiManager.addFloatingText(this.x, this.y - 20, Math.floor(amount), '#ff4400');
+        game.uiManager.addFloatingText(this.x, this.y - 20, Math.floor(amount), damageType === 'magic' ? '#cc00ff' : '#ff4400');
         if (this.hp <= 0) { this.hp = 0; this.isDead = true; this.onDeath(attacker); }
+    }
+    updateBuffs(dt) {
+        if (this.silenceTimer > 0) this.silenceTimer -= dt;
+        if (this.lifeBreakSlowTimer > 0) this.lifeBreakSlowTimer -= dt;
+
+        if (this.burningSpears && this.burningSpears.length > 0) {
+            for (let i = this.burningSpears.length - 1; i >= 0; i--) {
+                let stack = this.burningSpears[i];
+                stack.duration -= dt;
+                stack.tickTimer += dt;
+                if (stack.tickTimer >= 1.0) {
+                    stack.tickTimer -= 1.0;
+                    this.takeDamage(12, stack.attacker, false, 'magic');
+                }
+                if (stack.duration <= 0) this.burningSpears.splice(i, 1);
+            }
+        }
     }
     onDeath(attacker) {}
     moveTo(x, y) { this.targetX = x; this.targetY = y; }
@@ -320,6 +344,7 @@ class Entity {
         let currentSlow = 1.0;
         if (this.slowTimer > 0) { this.slowTimer -= dt; currentSlow *= 0.5; }
         if (this.headshotSlowTimer > 0) currentSlow *= 0.6;
+        if (this.lifeBreakSlowTimer > 0) currentSlow *= 0.4;
         if (this._nasalGooSlow) currentSlow *= Math.max(0.1, 1 - this._nasalGooSlow);
 
         if (window.game && game.shrapnelZones) {
@@ -384,9 +409,9 @@ class Entity {
 // --- КЛАССЫ ГЕРОЕВ ---
 class Hero extends Entity {
     constructor(x, y, team, name) {
-        super(x, y, team, 22, 600, 54, 295);
+        super(x, y, team, 22, 600, 54, 275);
         this.name = name; this.level = 1; this.xp = 0; this.maxXp = 100;
-        this.mp = 300; this.maxMp = 300; this.gold = 100;            // МНОГО ЗОЛОТА НА СТАРТЕ ДЛЯ ТЕСТОВ
+        this.mp = 300; this.maxMp = 300; this.gold = 100; 
         this.inventory = new Inventory(this); this.abilities = [];
         this.hpRegenBase = 2.0; this.mpRegenBase = 1.5; this.invulnerable = false;
         this.inventoryHpRegen = 0; this.inventoryManaRegen = 0;
@@ -399,7 +424,6 @@ class Hero extends Entity {
     onDeath(attacker) {
         audio.play('defeat');
 
-        // Награда за убийство героя
         if (attacker instanceof Hero) {
             attacker.gold += 300;
 
@@ -432,26 +456,27 @@ class Hero extends Entity {
         if (this.xp >= this.maxXp) {
             this.xp -= this.maxXp; this.level++; this.maxXp = 100 + this.level * 50;
             this.maxHp += 80; this.hp += 80;
-            this.maxMp += 40; this.mp += 40;
+            if (this.maxMp > 0) { this.maxMp += 40; this.mp += 40; }
             this.damage += 5;
 
-            // Регенерация при повышении уровня
             if (this.hpRegenBase === undefined) this.hpRegenBase = 2.0;
             if (this.mpRegenBase === undefined) this.mpRegenBase = 1.5;
             this.hpRegenBase += 0.5;
-            this.mpRegenBase += 0.25;
+            if (this.maxMp > 0) this.mpRegenBase += 0.25;
 
             game.uiManager.addFloatingText(this.x, this.y - 35, "LEVEL UP", '#ffd700');
         }
     }
     update(dt) {
         if (this.isDead) return;
+        this.updateBuffs(dt);
         if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.getHpRegen() * dt);
-        if (this.mp < this.maxMp) this.mp = Math.min(this.maxMp, this.mp + this.getMpRegen() * dt);
+        if (this.maxMp > 0 && this.mp < this.maxMp) this.mp = Math.min(this.maxMp, this.mp + this.getMpRegen() * dt);
         this.updateMovement(dt);
         
         let rate = 1.0;
-        if (this.headshotSlowTimer > 0) rate = 0.5;
+        if (this.headshotSlowTimer > 0) rate *= 0.5;
+        if (this.lifeBreakSlowTimer > 0) rate *= 0.4;
         if (this.attackCooldown > 0) this.attackCooldown -= dt * rate;
 
         if (this.attackTarget) {
@@ -461,14 +486,13 @@ class Hero extends Entity {
         }
         for (let ab of this.abilities) ab.update(dt);
         
-        // Vladmir's Offering aura handling
         if (this.hasVladmir) {
             const allies = this.team === 'radiant' ? game.radiantEntities() : game.direEntities();
             for (let unit of allies) {
                 const dist = Math.hypot(unit.x - this.x, unit.y - this.y);
                 if (dist <= 1200) {
                     unit.vladmirAura = true;
-                    unit.damageMultiplier = 1.18; // +18% damage
+                    unit.damageMultiplier = 1.18; 
                     unit.armorBonusAura = 2;
                     unit.mpRegenAura = 1;
                 } else {
@@ -479,7 +503,6 @@ class Hero extends Entity {
                 }
             }
         }
-        // Linken's Sphere cooldown decrement
         if (this.hasLinkens && this.linkensCooldown > 0) {
             this.linkensCooldown = Math.max(0, this.linkensCooldown - dt);
         }
@@ -540,41 +563,27 @@ class Hero extends Entity {
 class Morphling extends Hero {
     constructor(x, y, team) {
         super(x, y, team, 'Morphling');
-        this.attackRange = 250; // Базовая дальность атаки
-
-        // Базовые характеристики для Attribute Shift
+        this.attackRange = 250; 
         this.baseStrength = 22;
         this.baseAgility = 24;
-        this.minStatLimit = 5; // Минимальный лимит характеристик
-
-        // Хранение изначальных базовых параметров (чтобы корректно рассчитывать прирост)
+        this.minStatLimit = 5; 
         this.morphBaseHp = this.maxHp;
         this.morphBaseDamage = this.damage;
 
-        // Ability 1 (index 0): Waveform
         this.abilities.push(new Ability('Waveform', 'active', 10, 90, 'Dash forward, dealing 150 damage to all enemies in the path.'));
         this.waveformTimer = 0; this.wdx = 0; this.wdy = 0; this.wHits = [];
-
-        // Ability 2 (index 1): Adaptive Strike (W)
         this.abilities.push(new Ability('Adaptive Strike', 'active', 12, 100, 'Launches a watery projectile that deals magic damage, stuns, and knocks back the enemy.'));
-
-        // Ability 3 (index 2): Attribute Shift (Agility Gain) (D)
         this.abilities.push(new Ability('Shift (Agility)', 'active', 0, 0, 'Gradually moves Strength into Agility, increasing attack damage and speed while reducing health.'));
         this.isShiftingAgility = false;
-
-        // Ability 4 (index 3): Attribute Shift (Strength Gain) (F)
         this.abilities.push(new Ability('Shift (Strength)', 'active', 0, 0, 'Gradually moves Agility into Strength, increasing health while reducing attack damage.'));
         this.isShiftingStrength = false;
-
-        // Таймер для постепенного переноса статов (каждые 0.1 секунды)
         this.shiftTimer = 0;
     }
 
     useAbility(idx = 0) {
-        if (this.isDead) return;
+        if (this.isDead || this.silenceTimer > 0) return;
 
         if (idx === 0) {
-            // Существующая Waveform
             if (this.abilities[0].trigger(this)) {
                 this.invulnerable = true; this.waveformTimer = 0.25; this.wHits = [];
                 let ang = Math.atan2(this.targetY - this.y, this.targetX - this.x);
@@ -582,8 +591,7 @@ class Morphling extends Hero {
                 this.wdx = Math.cos(ang) * 1200; this.wdy = Math.sin(ang) * 1200;
             }
         } else if (idx === 1) {
-            // Способность W — Adaptive Strike
-            let castRange = this.attackRange + 150; // Дальность применения больше обычной атаки
+            let castRange = this.attackRange + 150; 
             let enemies = this.team === 'radiant' ? game.direEntities() : game.direEntities();
             let target = this.attackTarget || enemies.find(e => Math.hypot(e.x - this.x, e.y - this.y) <= castRange && !e.isDead);
 
@@ -594,14 +602,12 @@ class Morphling extends Hero {
                 }
             }
         } else if (idx === 2) {
-            // Способность D — Attribute Shift (Agility Gain)
             this.isShiftingAgility = !this.isShiftingAgility;
             if (this.isShiftingAgility) {
                 this.isShiftingStrength = false;
                 if (typeof audio !== 'undefined') audio.play('ability');
             }
         } else if (idx === 3) {
-            // Способность F — Attribute Shift (Strength Gain)
             this.isShiftingStrength = !this.isShiftingStrength;
             if (this.isShiftingStrength) {
                 this.isShiftingAgility = false;
@@ -647,18 +653,10 @@ class Morphling extends Hero {
     }
 
     recalculateStats() {
-        // сохраняем текущий процент здоровья
         let hpPercent = this.hp / this.maxHp;
-
-        // новое максимальное здоровье
         let oldMaxHp = this.maxHp;
         this.maxHp = this.morphBaseHp + (this.baseStrength - 22) * 20;
-
-        // здоровье меняется пропорционально
-        // пример: 10/100 -> 20/200
         this.hp = Math.max(1, this.maxHp * hpPercent);
-
-        // остальные характеристики
         this.damage = this.morphBaseDamage + (this.baseAgility - 24);
         this.attackRange = 230 + (this.baseAgility - 24) * 5;
 
@@ -670,19 +668,9 @@ class Morphling extends Hero {
 
         if (game.playerHero === this) {
             if (this.isShiftingAgility) {
-                game.uiManager.addFloatingText(
-                    this.x,
-                    this.y - 30,
-                    "+AGI",
-                    "#00ffcc"
-                );
+                game.uiManager.addFloatingText(this.x, this.y - 30, "+AGI", "#00ffcc");
             } else if (this.isShiftingStrength) {
-                game.uiManager.addFloatingText(
-                    this.x,
-                    this.y - 30,
-                    "+STR",
-                    "#ff3333"
-                );
+                game.uiManager.addFloatingText(this.x, this.y - 30, "+STR", "#ff3333");
             }
         }
     }
@@ -775,7 +763,7 @@ class Warlock extends Hero {
     }
     
     useAbility(idx) {
-        if (this.isDead) return;
+        if (this.isDead || this.silenceTimer > 0) return;
         
         if (this.isChannelingUpheaval && idx === 2) {
             this.isChannelingUpheaval = false;
@@ -793,13 +781,13 @@ class Warlock extends Hero {
                     targets.forEach(t => {
                         if (!t._fbPatched) {
                             let origDamage = t.takeDamage;
-                            t.takeDamage = function(amount, attacker, isFb) {
-                                origDamage.call(this, amount, attacker);
+                            t.takeDamage = function(amount, attacker, isFb = false, damageType = 'physical') {
+                                origDamage.call(this, amount, attacker, isFb, damageType);
                                 if (!isFb && !this.isDead && this._fbTimer > 0 && this._fbGroup) {
                                     let share = amount * 0.15;
                                     this._fbGroup.forEach(other => {
                                         if (other !== this && !other.isDead && other._fbTimer > 0) {
-                                            other.takeDamage(share, attacker, true);
+                                            other.takeDamage(share, attacker, true, damageType);
                                         }
                                     });
                                 }
@@ -1028,7 +1016,7 @@ class Bristleback extends Hero {
         super(x, y, team, 'Bristleback');
         this.maxHp = 800; this.hp = 800;
         this.damage = 58;
-        this.baseSpeed = 280; this.speed = 280;
+        this.baseSpeed = 260; this.speed = 260;
         this.attackRange = 120;
 
         this.abilities.push(new Ability('Viscous Nasal Goo', 'active', 2, 20, 'Fires goo at a target, slowing movement and reducing armor for 5 sec. Effects stack and refresh on each cast.'));
@@ -1122,7 +1110,7 @@ class Bristleback extends Hero {
     }
 
     useAbility(idx) {
-        if (this.isDead) return;
+        if (this.isDead || this.silenceTimer > 0) return;
 
         if (idx === 0) {
             const ab = this.abilities[0];
@@ -1172,7 +1160,7 @@ class Bristleback extends Hero {
         game.projectiles.push(new Projectile(this.x, this.y, this.attackTarget, finalDamage, this.team, this));
     }
 
-    takeDamage(amount, attacker) {
+    takeDamage(amount, attacker, isFb = false, damageType = 'physical') {
         if (this.isDead) return;
         let actualAmount = amount;
 
@@ -1185,7 +1173,7 @@ class Bristleback extends Hero {
             }
         }
 
-        super.takeDamage(actualAmount, attacker);
+        super.takeDamage(actualAmount, attacker, isFb, damageType);
     }
 
     draw(ctx, camera) {
@@ -1222,7 +1210,7 @@ class Sniper extends Hero {
         this.shrapnelChargeCooldown = 15;
     }
     useAbility(idx) {
-        if (this.isDead) return;
+        if (this.isDead || this.silenceTimer > 0) return;
         if (idx === 0) { 
             let ab = this.abilities[0];
             if (this.shrapnelCharges > 0 && this.mp >= ab.manaCost) {
@@ -1309,6 +1297,122 @@ class Sniper extends Hero {
     }
 }
 
+class Huskar extends Hero {
+    constructor(x, y, team) {
+        super(x, y, team, 'Huskar');
+        this.maxHp = 700; this.hp = 700;
+        this.maxMp = 0; this.mp = 0; this.mpRegenBase = 0;
+        this.baseStrength = 40;
+        this.attackRange = 400;
+        this.burningSpearActive = false;
+        this.lifeBreakTarget = null;
+
+        this.abilities.push(new Ability('Inner Fire', 'active', 12, 0, 'Deals 100 magic damage, knocks back enemies and silences them for 3s. Costs 75 HP.'));
+        this.abilities.push(new Ability('Burning Spear', 'active', 0, 0, 'Toggle. Attacks cost 2% max HP and deal 12 magic dmg/sec for 9s.'));
+        this.abilities.push(new Ability("Berserker's Blood", 'passive', 0, 0, 'More Attack Speed, Magic Resist, and Regen based on missing HP.'));
+        this.abilities.push(new Ability('Life Break', 'active', 14, 0, 'Leaps to target. Costs 35% current HP. Deals 32% target current HP as magic damage and slows 60% for 3s.'));
+    }
+
+    useAbility(idx) {
+        if (this.isDead || this.silenceTimer > 0) return;
+
+        if (idx === 0 && this.abilities[0].currentCooldown <= 0 && this.hp > 75) {
+            this.hp -= 75;
+            this.abilities[0].currentCooldown = this.abilities[0].maxCooldown;
+            audio.play('ability');
+            let enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+            for (let e of enemies) {
+                let dx = e.x - this.x; let dy = e.y - this.y;
+                let dist = Math.hypot(dx, dy);
+                if (dist <= 250) {
+                    e.takeDamage(100, this, false, 'magic');
+                    e.silenceTimer = 3.0;
+                    if (!(e instanceof Tower) && !(e instanceof Ancient)) {
+                        let pushAngle = Math.atan2(dy, dx);
+                        e.x += Math.cos(pushAngle) * 150;
+                        e.y += Math.sin(pushAngle) * 150;
+                    }
+                }
+            }
+        }
+        else if (idx === 1) {
+            this.burningSpearActive = !this.burningSpearActive;
+            let slot = document.getElementById('ability-1');
+            if (this.burningSpearActive && slot) slot.classList.add('autocast-active');
+            else if (slot) slot.classList.remove('autocast-active');
+        }
+        else if (idx === 3 && this.abilities[3].currentCooldown <= 0) {
+            let enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+            let target = this.attackTarget || enemies.find(e => Math.hypot(e.x - this.x, e.y - this.y) <= 500);
+            if (target && target.blockSpell && target.blockSpell(this)) return;
+            if (target && Math.hypot(target.x - this.x, target.y - this.y) <= 500) {
+                this.hp -= this.hp * 0.35;
+                this.abilities[3].currentCooldown = this.abilities[3].maxCooldown;
+                this.lifeBreakTarget = target;
+                audio.play('ability');
+            }
+        }
+    }
+
+    update(dt) {
+        if (this.isDead) return;
+
+        let hpPct = this.hp / this.maxHp;
+        let ratio = Math.max(0, Math.min(1, (1.0 - hpPct) / 0.9));
+        this.magicResistance = 0.25 * ratio;
+        let bonusAS = 170 * ratio;
+        this.attackSpeed = 1.2 / (1 + (bonusAS / 100));
+        this.hpRegenBase = 2.0 + (this.baseStrength * 0.55 * ratio);
+
+        if (this.lifeBreakTarget) {
+            if (this.lifeBreakTarget.isDead) {
+                this.lifeBreakTarget = null;
+            } else {
+                let dx = this.lifeBreakTarget.x - this.x;
+                let dy = this.lifeBreakTarget.y - this.y;
+                let dist = Math.hypot(dx, dy);
+                if (dist < 30) {
+                    let dmg = this.lifeBreakTarget.hp * 0.32;
+                    this.lifeBreakTarget.takeDamage(dmg, this, false, 'magic');
+                    this.lifeBreakTarget.lifeBreakSlowTimer = 3.0;
+                    this.lifeBreakTarget.hitEffectTimer = 0.2;
+                    this.lifeBreakTarget = null;
+                    this.targetX = this.x; this.targetY = this.y;
+                } else {
+                    this.x += (dx / dist) * 1200 * dt;
+                    this.y += (dy / dist) * 1200 * dt;
+                    this.targetX = this.x; this.targetY = this.y;
+                }
+            }
+            for (let ab of this.abilities) ab.update(dt);
+            return; 
+        }
+
+        super.update(dt);
+        this.mp = 0; 
+    }
+
+    performAttack() {
+        this.attackCooldown = this.attackSpeed; audio.play('attack');
+        let finalDamage = this.damage;
+        if (this.vladmirAura) finalDamage *= 1.18;
+
+        let isBurning = this.burningSpearActive;
+        if (isBurning) {
+            let cost = this.maxHp * 0.02;
+            if (this.hp > cost) {
+                this.hp -= cost;
+            } else {
+                isBurning = false; 
+            }
+        }
+
+        let proj = new Projectile(this.x, this.y, this.attackTarget, finalDamage, this.team, this);
+        proj.isBurningSpear = isBurning;
+        game.projectiles.push(proj);
+    }
+}
+
 class ShrapnelZone {
     constructor(x, y, team, caster) {
         this.x = x; this.y = y; this.team = team; this.caster = caster;
@@ -1359,14 +1463,14 @@ class Creep extends Entity {
         let rng = type === 'melee' ? 45 : 280;
         super(x, y, team, 11, hp, dmg, 195); this.type = type; this.attackRange = rng; this.attackSpeed = 1.1;
     }
-    takeDamage(amount, attacker) {
+    takeDamage(amount, attacker, isFb = false, damageType = 'physical') {
         if (this.isDead) return;
 
         const actualAttacker = attacker && !(attacker instanceof Entity) && attacker.attacker instanceof Entity
             ? attacker.attacker
             : attacker;
 
-        super.takeDamage(amount, attacker);
+        super.takeDamage(amount, attacker, isFb, damageType);
         if (this.isDead) return;
 
         if (actualAttacker instanceof Entity && actualAttacker !== this && actualAttacker.team !== this.team && !actualAttacker.isDead) {
@@ -1381,16 +1485,17 @@ class Creep extends Entity {
     }
     update(dt) {
         if (this.isDead) return;
+        this.updateBuffs(dt);
         
         let rate = 1.0;
-        if (this.headshotSlowTimer > 0) rate = 0.5;
+        if (this.headshotSlowTimer > 0) rate *= 0.5;
+        if (this.lifeBreakSlowTimer > 0) rate *= 0.4;
         if (this.attackCooldown > 0) this.attackCooldown -= dt * rate;
 
         if (!this.attackTarget || this.attackTarget.hp <= 0 || this.attackTarget.team === this.team) {
             let closest = null;
             let minDist = Infinity;
 
-            // 1. Вражеские крипы
             for (let creep of game.creeps) {
                 if (!creep || creep.isDead || creep.team === this.team) continue;
                 let dist = Math.hypot(creep.x - this.x, creep.y - this.y);
@@ -1401,7 +1506,6 @@ class Creep extends Entity {
                 }
             }
 
-            // 2. Герои только если очень близко и нет крипов
             if (!closest) {
                 const heroes = [game.playerHero, game.enemyHero];
 
@@ -1416,7 +1520,6 @@ class Creep extends Entity {
                 }
             }
 
-            // 3. Башни
             if (!closest) {
                 for (let tower of game.towers) {
                     if (!tower || tower.isDead || tower.team === this.team) continue;
@@ -1429,7 +1532,6 @@ class Creep extends Entity {
                 }
             }
 
-            // 4. Трон
             if (!closest) {
                 for (let ancient of game.ancients) {
                     if (!ancient || ancient.isDead || ancient.team === this.team) continue;
@@ -1455,7 +1557,6 @@ class Creep extends Entity {
                 if (this.vladmirAura) finalDamage *= 1.18;
                 if (this.type === 'melee') { 
                     this.attackTarget.takeDamage(finalDamage, this);
-                    // Vampirism on hit
                     if (this.vladmirAura) {
                         let lifesteal = finalDamage * 0.20;
                         if (this.attackTarget instanceof Creep) lifesteal *= 0.6;
@@ -1537,15 +1638,17 @@ class Catapult extends Entity {
         super(x, y, team, 24, 700, 90, 70);
         this.attackRange = 350;
         this.attackCooldown = 0;
-        this.attackSpeed = 2.5; // атака раз в 2.5 секунды
+        this.attackSpeed = 2.5; 
         this.bounty = 80;
     }
 
     update(dt) {
         if (this.isDead) return;
+        this.updateBuffs(dt);
 
         let rate = 1.0;
-        if (this.headshotSlowTimer > 0) rate = 0.5;
+        if (this.headshotSlowTimer > 0) rate *= 0.5;
+        if (this.lifeBreakSlowTimer > 0) rate *= 0.4;
         if (this.attackCooldown > 0) this.attackCooldown -= dt * rate;
 
         if (!this.attackTarget || this.attackTarget.hp <= 0 || this.attackTarget.team === this.team) {
@@ -1614,11 +1717,9 @@ class Catapult extends Entity {
         const screenX = this.x - camera.x;
         const screenY = this.y - camera.y;
 
-        // Корпус
         ctx.fillStyle = this.team === 'radiant' ? '#4caf50' : '#c62828';
         ctx.fillRect(screenX - 18, screenY - 12, 36, 24);
 
-        // Колёса
         ctx.fillStyle = '#5d4037';
 
         ctx.beginPath();
@@ -1629,7 +1730,6 @@ class Catapult extends Entity {
         ctx.arc(screenX + 12, screenY + 14, 6, 0, Math.PI * 2);
         ctx.fill();
 
-        // Метательное устройство
         ctx.strokeStyle = '#8d6e63';
         ctx.lineWidth = 4;
 
@@ -1638,7 +1738,6 @@ class Catapult extends Entity {
         ctx.lineTo(screenX + (this.team === 'radiant' ? 20 : -20), screenY - 25);
         ctx.stroke();
 
-        // Полоска HP
         const barWidth = 40;
 
         ctx.fillStyle = '#000';
@@ -1654,7 +1753,6 @@ class Catapult extends Entity {
     }
 }
 
- 
 class Tower extends Entity {
     constructor(x, y, team) {
         super(x, y, team, 32, 4500, 85, 0);
@@ -1665,6 +1763,7 @@ class Tower extends Entity {
     }
     update(dt) {
         if (this.isDead) return;
+        this.updateBuffs(dt);
         if (this.glyphActive) {
             this.glyphTimer -= dt;
             if (this.glyphTimer <= 0) {
@@ -1683,9 +1782,9 @@ class Tower extends Entity {
             game.projectiles.push(new Projectile(this.x, this.y - 40, this.attackTarget, this.damage, this.team, this));
         }
     }
-    takeDamage(amount, attacker) {
+    takeDamage(amount, attacker, isFb = false, damageType = 'physical') {
         if (this.isDead || this.glyphActive) return;
-        super.takeDamage(amount, attacker);
+        super.takeDamage(amount, attacker, isFb, damageType);
     }
     onDeath(attacker) { audio.play('tower_break'); }
     draw(ctx, camera) {
@@ -1713,6 +1812,11 @@ class Tower extends Entity {
 
 class Ancient extends Entity {
     constructor(x, y, team) { super(x, y, team, 45, 2800, 0, 0); }
+    update(dt) {
+        if (this.isDead) return;
+        this.updateBuffs(dt);
+        super.update(dt);
+    }
     onDeath(attacker) { game.endGame(this.team === 'radiant' ? 'dire' : 'radiant'); }
     draw(ctx, camera) {
         if (this.isDead) return; this.drawShadow(ctx, camera);
@@ -1751,7 +1855,7 @@ class Projectile {
     constructor(x, y, target, damage, team, attacker) {
         this.x = x; this.y = y; this.target = target; this.damage = damage; this.team = team; this.attacker = attacker;
         this.speed = 500; this.radius = 5; this.isHs = false; this.isAss = false;
-        this.isCrit = false;
+        this.isCrit = false; this.isBurningSpear = false;
     }
     update(dt) {
         if (!this.target || this.target.isDead) return true;
@@ -1779,8 +1883,11 @@ class Projectile {
             if (this.isCrit) {
                 game.uiManager.addFloatingText(this.target.x, this.target.y - 45, "CRIT!", '#ff0000');
             }
+            if (this.isBurningSpear) {
+                if (!this.target.burningSpears) this.target.burningSpears = [];
+                this.target.burningSpears.push({ duration: 9.0, tickTimer: 0, attacker: this.attacker });
+            }
             this.target.takeDamage(this.damage, this.attacker);
-            // Vampirism from Vladmir's Offering
             try {
                 const attacker = this.attacker;
                 if (attacker && attacker.vladmirAura) {
@@ -1797,7 +1904,7 @@ class Projectile {
     }
     draw(ctx, camera) {
         let sx = this.x - camera.x; let sy = this.y - camera.y;
-        ctx.fillStyle = this.isAss ? '#ff0000' : (this.isHs ? '#ff8c00' : '#ffff00');
+        ctx.fillStyle = this.isAss ? '#ff0000' : (this.isHs ? '#ff8c00' : (this.isBurningSpear ? '#ff4500' : '#ffff00'));
         ctx.beginPath(); ctx.arc(sx, sy, this.radius, 0, Math.PI*2); ctx.fill();
     }
 }
@@ -1891,12 +1998,10 @@ class AIController {
         this.shopTimer += dt; 
         if (this.shopTimer > 4) { this.shopTimer = 0; this.buyLogic(); }
 
-        // --- ИСПРАВЛЕННАЯ ЛОГИКА СБОРА РУН (БЕЗ ЗАСТРЕВАНИЯ) ---
         let targetRune = null;
         if (game.bountyRunes && game.bountyRunes.length > 0) {
-            // Фильтруем только существующие и еще не подобранные руны
             let activeRunes = game.bountyRunes.filter(r => r && !r.isPickedUp);
-            let minRuneDist = 700; // Радиус обнаружения руны
+            let minRuneDist = 700; 
 
             for (let rune of activeRunes) {
                 let d = Math.hypot(rune.x - this.hero.x, rune.y - this.hero.y);
@@ -1907,36 +2012,27 @@ class AIController {
             }
         }
 
-        // Если нашли активную руну
         if (targetRune) {
             let distToRune = Math.hypot(targetRune.x - this.hero.x, targetRune.y - this.hero.y);
             
-            // ЕСЛИ БОТ УЖЕ СЛИШКОМ БЛИЗКО (в радиусе подбора)
             if (distToRune <= 40) {
-                // Принудительно помечаем руну как подобранную, чтобы сработал триггер игры
                 targetRune.isPickedUp = true;
                 
-                // Начисляем золото команде/герою, если это не произошло автоматически в движке игры
                 if (typeof targetRune.pickUp === 'function') {
                     targetRune.pickUp(this.hero);
                 } else {
-                    this.hero.gold += 100; // Стандартный бонус золота
+                    this.hero.gold += 100; 
                     if (game.uiManager) game.uiManager.addFloatingText(this.hero.x, this.hero.y - 40, "+100 🪙", '#ffd700');
                 }
                 
-                // Сбрасываем команду движения, чтобы бот переключился на линию
                 this.hero.attackTarget = null;
             } else {
-                // Если бот еще далеко — просто бежим к ней
                 this.hero.attackTarget = null;
                 this.hero.moveTo(targetRune.x, targetRune.y);
-                return; // Блокируем остальной ИИ, пока идем к руне
+                return; 
             }
         }
 
-        // --- ЕСЛИ РУНЫ НЕТ ИЛИ ОНА ПОДОБРАНА, ИДЕМ ПО ДЕЛАМ ---
-        
-        // Отступление на базу при критическом уровне здоровья
         if (this.hero.hp / this.hero.maxHp < 0.3 || this.hero.isHealingAtFountain) {
             this.hero.attackTarget = null;
             this.hero.isHealingAtFountain = true;
@@ -1954,7 +2050,6 @@ class AIController {
         }
         this.hero.isHealingAtFountain = false;
 
-        // Bot glyph usage when an allied tower is under attack and glyph is available
         let alliedTowers = game.towers.filter(t => t.team === this.hero.team && !t.isDead);
         let threatenedTower = alliedTowers.find(tower => {
             let attackers = (tower.team === 'radiant' ? game.direEntities() : game.radiantEntities())
@@ -1971,18 +2066,15 @@ class AIController {
         let enemies = this.hero.team === 'radiant' ? game.direEntities() : game.radiantEntities();
         let allies = this.hero.team === 'radiant' ? game.radiantEntities() : game.direEntities();
 
-        // --- УПРАВЛЕНИЕ СПОСОБНОСТЯМИ MORPHLING ---
         if (this.hero instanceof Morphling) {
             let castRange = this.hero.attackRange + 150;
             let targetEnemy = enemies.find(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) <= castRange && !e.isDead);
 
-            // Использование W — Adaptive Strike
             if (targetEnemy && this.hero.abilities[1].currentCooldown === 0 && this.hero.mp >= 100) {
                 this.hero.attackTarget = targetEnemy;
                 this.hero.useAbility(1);
             }
 
-            // Интеллектуальное переключение перекачки (Attribute Shift)
             let currentHpPct = this.hero.hp / this.hero.maxHp;
 
             if (currentHpPct < 0.6) {
@@ -2003,7 +2095,6 @@ class AIController {
                 }
             }
 
-            // Использование Waveform
             if (this.hero.abilities[0].currentCooldown === 0 && this.hero.mp >= 90) {
                 let enemiesInWave = enemies.filter(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 300);
                 if (enemiesInWave.length >= 2) {
@@ -2011,7 +2102,6 @@ class AIController {
                 }
             }
         } 
-        // --- ЛОГИКА ДЛЯ SNIPER ---
         else if (this.hero instanceof Sniper) {
             if (this.hero.shrapnelCharges > 0 && Math.random() < 0.05) {
                 let targetCreepOrHero = enemies.find(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 500);
@@ -2032,7 +2122,6 @@ class AIController {
                 }
             }
         } 
-        // --- ЛОГИКА ДЛЯ WARLOCK ---
         else if (this.hero instanceof Warlock) {
             if (this.hero.isChannelingUpheaval) {
                 let enemiesInUpheaval = enemies.filter(e => Math.hypot(e.x - this.hero.upheavalX, e.y - this.hero.upheavalY) <= 575);
@@ -2100,8 +2189,26 @@ class AIController {
                 }
             }
         }
+        else if (this.hero instanceof Huskar) {
+            if (this.hero.abilities[0].currentCooldown === 0 && this.hero.hp > 200) {
+                let enemiesNear = enemies.filter(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 250);
+                if (enemiesNear.length > 0) this.hero.useAbility(0);
+            }
+            if (this.hero.abilities[3].currentCooldown === 0 && this.hero.hp > 300) {
+                let target = enemies.find(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 500 && e instanceof Hero);
+                if (target) {
+                    this.hero.attackTarget = target;
+                    this.hero.useAbility(3);
+                }
+            }
+            let targetForW = this.hero.attackTarget;
+            if (targetForW && targetForW instanceof Hero && this.hero.hp / this.hero.maxHp > 0.3) {
+                if (!this.hero.burningSpearActive) this.hero.useAbility(1);
+            } else {
+                if (this.hero.burningSpearActive) this.hero.useAbility(1);
+            }
+        }
 
-        // Стандартный поиск ближайшей цели для атаки / пуша линии
         let target = null; 
         let minDist = Infinity;
         for (let e of enemies) {
@@ -2147,16 +2254,15 @@ class UIManager {
         document.getElementById('hp-indicator').style.width = `${(p.hp / p.maxHp) * 100}%`;
         document.getElementById('hp-text').innerText = `${Math.floor(p.hp)}/${p.maxHp}`;
         document.getElementById('hp-regen-text').innerText = `+${p.getHpRegen().toFixed(1)}`;
-        document.getElementById('mp-indicator').style.width = `${(p.mp / p.maxMp) * 100}%`;
-        document.getElementById('mp-text').innerText = `${Math.floor(p.mp)}/${p.maxMp}`;
-        document.getElementById('mp-regen-text').innerText = `+${p.getMpRegen().toFixed(1)}`;
+        document.getElementById('mp-indicator').style.width = p.maxMp > 0 ? `${(p.mp / p.maxMp) * 100}%` : '0%';
+        document.getElementById('mp-text').innerText = p.maxMp > 0 ? `${Math.floor(p.mp)}/${p.maxMp}` : '0/0';
+        document.getElementById('mp-regen-text').innerText = p.maxMp > 0 ? `+${p.getMpRegen().toFixed(1)}` : '+0.0';
         document.getElementById('gold-value').innerText = Math.floor(p.gold);
 
         const profileIcon = document.getElementById('hero-profile-icon');
         if (profileIcon) {
             const heroKey = p.name || '';
             if (profileIcon.dataset.hero !== heroKey) {
-                // only change src/alt when hero actually changes to avoid restarting GIF each frame
                 if (heroKey === 'Morphling') {
                     profileIcon.src = 'images/morphling_profile.gif';
                     profileIcon.alt = 'Morphling profile';
@@ -2169,6 +2275,9 @@ class UIManager {
                 } else if (heroKey === 'Bristleback') {
                     profileIcon.src = 'images/Bristleback_icon.svg';
                     profileIcon.alt = 'Bristleback profile';
+                } else if (heroKey === 'Huskar') {
+                    profileIcon.src = 'images/Huskar_icon.webp';
+                    profileIcon.alt = 'Huskar profile';
                 } else {
                     profileIcon.src = '';
                     profileIcon.alt = '';
@@ -2200,7 +2309,7 @@ class UIManager {
                         displayName = `${ab.name} (${p.shrapnelCharges})`;
                     }
                     slot.querySelector('.ability-name').innerText = displayName;
-                    tt.innerHTML = `<strong>${ab.name}</strong><br>${ab.description}<br>Mana: ${ab.manaCost} | CD: ${ab.maxCooldown}s`;
+                    tt.innerHTML = `<strong>${ab.name}</strong><br>${ab.description}<br>Cost: ${ab.manaCost} | CD: ${ab.maxCooldown}s`;
                     
                     if (p instanceof Sniper && i === 0) {
                         if (p.shrapnelCharges === 0) {
@@ -2290,7 +2399,7 @@ class Game {
         this.shrapnelZones = [];
         this.effects = [];
         this.matchTime = 0; this.creepTimer = 0; this.lastTime = performance.now();
-        this.globalSpeedMultiplier = 0.75; // уменьшает скорость передвижения всех юнитов
+        this.globalSpeedMultiplier = 0.75; 
         this.glyphCooldown = { radiant: 0, dire: 0 }; this.glyphMaxCooldown = 60;
         this.glyphActive = { radiant: false, dire: false }; this.glyphDuration = 8; this.glyphTimer = { radiant: 0, dire: 0 };
         this.glyphShieldReduction = 0.4;
@@ -2311,7 +2420,7 @@ class Game {
     start(selectedHeroName) {
         audio.init();
         this.playerHero = this.createHero(selectedHeroName, 200, this.map.laneY, 'radiant');
-        const pool = ['Morphling', 'Warlock', 'Sniper', 'Bristleback'];
+        const pool = ['Morphling', 'Warlock', 'Sniper', 'Bristleback', 'Huskar'];
         this.enemyHero = this.createHero(pool[Math.floor(Math.random() * pool.length)], 3000, this.map.laneY, 'dire');
         this.aiController = new AIController(this.enemyHero);
         document.getElementById('hero-selection').classList.add('hidden');
@@ -2322,6 +2431,7 @@ class Game {
         if (name === 'Morphling') return new Morphling(x, y, team);
         if (name === 'Warlock') return new Warlock(x, y, team);
         if (name === 'Bristleback') return new Bristleback(x, y, team);
+        if (name === 'Huskar') return new Huskar(x, y, team);
         return new Sniper(x, y, team);
     }
     radiantEntities() {
@@ -2339,12 +2449,8 @@ class Game {
         this.creeps.push(new Creep(320, this.map.laneY, 'radiant', 'ranged'));
         this.creeps.push(new Creep(2880, this.map.laneY, 'dire', 'ranged'));
 
-        // Каждые 3 волны — катапульты
         if (this.waveNumber % 3 === 0) {
-            // Radiant
             this.creeps.push(new Catapult(350, 470, 'radiant'));
-
-            // Dire
             this.creeps.push(new Catapult(3650, 470, 'dire'));
         }
         
@@ -2408,6 +2514,12 @@ class Game {
         document.getElementById('close-shop-btn').addEventListener('click', () => this.toggleShop());
         document.querySelectorAll('.shop-item').forEach(el => {
             el.addEventListener('click', () => this.buyItem(el.getAttribute('data-item')));
+        });
+        document.getElementById('ability-1').addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            if (this.playerHero && this.playerHero.name === 'Huskar') {
+                this.playerHero.useAbility(1);
+            }
         });
     }
     toggleShop() { document.getElementById('shop-modal').classList.toggle('hidden'); }
