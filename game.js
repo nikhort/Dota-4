@@ -2033,7 +2033,8 @@ class AIController {
             }
         }
 
-        if (this.hero.hp / this.hero.maxHp < 0.3 || this.hero.isHealingAtFountain) {
+        // Все боты, кроме Хускара, возвращаются на фонтан при < 30% HP
+        if (!(this.hero instanceof Huskar) && (this.hero.hp / this.hero.maxHp < 0.3 || this.hero.isHealingAtFountain)) {
             this.hero.attackTarget = null;
             this.hero.isHealingAtFountain = true;
             this.hero.moveTo(
@@ -2190,6 +2191,18 @@ class AIController {
             }
         }
         else if (this.hero instanceof Huskar) {
+            // Если у Хускара критически мало здоровья (меньше 5%), он немного отступает назад
+            if (this.hero.hp / this.hero.maxHp < 0.05) {
+                this.hero.attackTarget = null; // Сбрасываем цель атаки, чтобы не бежал вперед
+                // Вычисляем точку отхода назад (в сторону фонтана своей команды)
+                let retreatX = this.hero.team === 'radiant' ? Math.max(40, this.hero.x - 100) : Math.min(3160, this.hero.x + 100);
+                this.hero.moveTo(retreatX, game.map.laneY);
+                
+                if (!this.hero.burningSpearActive) this.hero.useAbility(1); // Стрелы всё равно держим активными
+                return; // Прерываем выполнение шага ИИ, чтобы бот гарантированно отступал, а не шел в атаку ниже по коду
+            }
+
+            // Обычная логика каста способностей (активна, если HP >= 5%)
             if (this.hero.abilities[0].currentCooldown === 0 && this.hero.hp > 200) {
                 let enemiesNear = enemies.filter(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 250);
                 if (enemiesNear.length > 0) this.hero.useAbility(0);
@@ -2201,11 +2214,10 @@ class AIController {
                     this.hero.useAbility(3);
                 }
             }
-            let targetForW = this.hero.attackTarget;
-            if (targetForW && targetForW instanceof Hero && this.hero.hp / this.hero.maxHp > 0.3) {
-                if (!this.hero.burningSpearActive) this.hero.useAbility(1);
-            } else {
-                if (this.hero.burningSpearActive) this.hero.useAbility(1);
+            
+            // Горящие стрелы теперь включены всегда (если были выключены — включаем)
+            if (!this.hero.burningSpearActive) {
+                this.hero.useAbility(1);
             }
         }
 
