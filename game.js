@@ -277,6 +277,7 @@ class Inventory {
                 this.slots[i] = item;
                 this.applyItemStats(item, 1);
                 this.combineVanguardPairs();
+                this.combineHeart();
                 return true;
             }
         } 
@@ -302,6 +303,25 @@ class Inventory {
             this.applyItemStats(vanguard, 1);
             if (game && game.uiManager) {
                 game.uiManager.addFloatingText(this.owner.x, this.owner.y - 30, 'VANGUARD!', '#ffd700');
+            }
+        }
+    }
+    combineHeart() {
+        let ringIndex = this.slots.findIndex(i => i && i.id === 'ringtarrasque');
+        let reaverIndex = this.slots.findIndex(i => i && i.id === 'reaver');
+        if (ringIndex !== -1 && reaverIndex !== -1) {
+            const combineSlot = Math.min(ringIndex, reaverIndex);
+            const removeSlot = Math.max(ringIndex, reaverIndex);
+            this.removeItemAt(removeSlot);
+            this.removeItemAt(combineSlot);
+            const heart = new Item('heart', 'Heart of Tarrasque', 0, {
+                hp: 25,
+                hpRegen: 12
+            });
+            this.slots[combineSlot] = heart;
+            this.applyItemStats(heart, 1);
+            if (game && game.uiManager) {
+                game.uiManager.addFloatingText(this.owner.x, this.owner.y - 30, 'HEART OF TARRASQUE!', '#00ff00');
             }
         }
     }
@@ -583,7 +603,18 @@ class Hero extends Entity {
         this.inventoryHpRegen = 0; this.inventoryManaRegen = 0;
         this.isHealingAtFountain = false;
     }
-    getHpRegen() { return this.hpRegenBase + (this.inventoryHpRegen || 0); }
+    getHpRegen() {
+        let regen = this.hpRegenBase + (this.inventoryHpRegen || 0);
+        // Пассивка Heart of Tarrasque: Behemoth's Blood
+        if (this.inventory) {
+            const heart = this.inventory.items.find(item => item.id === 'heart');
+            if (heart) {
+                const missing = this.maxHp - this.hp;
+                regen += missing * 0.015;
+            }
+        }
+        return regen;
+    }
     getMpRegen() {
         return this.mpRegenBase + (this.mpRegenAura || 0) + (this.inventoryManaRegen || 0);
     }
@@ -2717,6 +2748,44 @@ class Game {
         ];
         this.initWorld(); 
         this.initInput();
+        this.initShopItems(); // добавить новые предметы в магазин
+    }
+
+    initShopItems() {
+        const shopList = document.querySelector('.shop-items-list');
+        if (!shopList) return;
+        // Проверяем, не добавлены ли уже (чтобы избежать дублирования)
+        if (shopList.querySelector('[data-item="ringtarrasque"]')) return;
+
+        // Ring of Tarrasque
+        const ringItem = document.createElement('div');
+        ringItem.className = 'shop-item';
+        ringItem.setAttribute('data-item', 'ringtarrasque');
+        ringItem.innerHTML = `
+            <img class="shop-item-icon" src="images/ring_of_tarrasque_icon.png" alt="Ring of Tarrasque">
+            <div class="shop-item-info">
+                <h3>💍 Ring of Tarrasque</h3>
+                <p>Price: 1700 🪙</p>
+                <p>Bonus: +12 HP regen</p>
+            </div>
+        `;
+        shopList.appendChild(ringItem);
+
+        // Reaver
+        const reaverItem = document.createElement('div');
+        reaverItem.className = 'shop-item';
+        reaverItem.setAttribute('data-item', 'reaver');
+        reaverItem.innerHTML = `
+            <img class="shop-item-icon" src="images/reaver_icon.png" alt="Reaver">
+            <div class="shop-item-info">
+                <h3>⚔️ Reaver</h3>
+                <p>Price: 2500 🪙</p>
+                <p>Bonus: +25 Health</p>
+            </div>
+        `;
+        shopList.appendChild(reaverItem);
+
+        // Также можно добавить информацию о сборке Heart, но не обязательно.
     }
 
     getAllHeroes() {
@@ -2738,6 +2807,7 @@ class Game {
         this.fountains.push(new Fountain(this.map.radiantBase.x - 100, this.map.radiantBase.y + 100, 'radiant'));
         this.fountains.push(new Fountain(this.map.direBase.x + 100, this.map.direBase.y - 100, 'dire'));
 
+        // Исправление нижней линии: бараки между троном и T3, башни в порядке T3, T2, T1 от базы
         const laneData = {
             top: {
                 towers: {
@@ -2765,8 +2835,8 @@ class Game {
                     dire:    [{x: 7500, y: 3500}, {x: 7500, y: 2500}, {x: 7500, y: 1500}]
                 },
                 barracks: {
-                    radiant: {x: 7500, y: 2150},
-                    dire:    {x: 7500, y: 800}
+                    radiant: {x: 1500, y: 5500},
+                    dire:    {x: 7500, y: 1250}
                 }
             }
         };
@@ -2776,13 +2846,15 @@ class Game {
             const data = laneData[lane];
             for (let i = 0; i < 3; i++) {
                 const pos = data.towers.radiant[i];
-                const tower = new Tower(pos.x, pos.y, 'radiant', i+1);
+                const tier = (lane === 'bottom') ? 3 - i : i + 1;
+                const tower = new Tower(pos.x, pos.y, 'radiant', tier);
                 tower.lane = lane;
                 this.towers.push(tower);
             }
             for (let i = 0; i < 3; i++) {
                 const pos = data.towers.dire[i];
-                const tower = new Tower(pos.x, pos.y, 'dire', i+1);
+                const tier = (lane === 'bottom') ? 3 - i : i + 1;
+                const tower = new Tower(pos.x, pos.y, 'dire', tier);
                 tower.lane = lane;
                 this.towers.push(tower);
             }
@@ -2988,6 +3060,9 @@ class Game {
         if (type === 'ringhealth') it = new Item('ringhealth', 'Ring of Health', 400, { hpRegen: 4.5 });
         if (type === 'vladmir') it = new Item('vladmir', "Vladmir's Offering", 1500, { manaRegen: 0.75, armorBonus: 1 });
         if (type === 'linkens') it = new Item('linkens', "Linken's Sphere", 1500, { hp: 200, mana: 200, damage: 15, manaRegen: 5 });
+        // Новые предметы
+        if (type === 'ringtarrasque') it = new Item('ringtarrasque', 'Ring of Tarrasque', 1700, { hpRegen: 12 });
+        if (type === 'reaver') it = new Item('reaver', 'Reaver', 2500, { hp: 25 });
         if (it && p.gold >= it.cost && p.inventory.addItem(it)) { 
             p.gold -= it.cost; audio.play('buy');
             if (it.id === 'vladmir') { p.hasVladmir = true; }
