@@ -2229,108 +2229,188 @@ class Barracks {
 }
 
 // ----------------------------------------------
-// ИСКУССТВЕННЫЙ ИНТЕЛЛЕКТ (упрощённый)
+// НОВЫЙ КЛАСС ИИ ДЛЯ БОТОВ
 // ----------------------------------------------
-class AIController {
-    constructor(hero) { 
-        this.hero = hero; 
-        this.shopTimer = 0; 
-        this.currentLane = 'mid';
+class BotAI {
+    constructor(hero, lane, game) {
+        this.hero = hero;
+        this.lane = lane;
+        this.game = game;
+        this.state = 'normal'; // 'normal', 'retreat', 'heal'
+        this.fountain = hero.team === 'radiant' ? game.fountains[0] : game.fountains[1];
+        this.waypoints = hero.team === 'radiant' ? game.map.waypoints[lane] : game.map.waypointsReverse[lane];
+        this.waypointIndex = 0;
+        this.retreatThreshold = 0.10; // 10% hp
+        this.target = null;
+        this.attackCooldown = 0;
     }
+
     update(dt) {
-        if (this.hero.isDead) return;
-        this.shopTimer += dt; 
-        if (this.shopTimer > 4) { this.shopTimer = 0; this.buyLogic(); }
+        const hero = this.hero;
+        if (hero.isDead) return;
 
-        const fountain = this.hero.team === 'radiant' ? game.fountains[0] : game.fountains[1];
-        if (this.hero.hp / this.hero.maxHp < 0.3 && Math.hypot(this.hero.x - fountain.x, this.hero.y - fountain.y) > 150) {
+        // Проверяем состояние здоровья
+        const hpPercent = hero.hp / hero.maxHp;
+
+        // Переход в режим отступления
+        if (hpPercent <= this.retreatThreshold && this.state !== 'heal') {
+            this.state = 'retreat';
             this.hero.attackTarget = null;
-            this.hero.moveTo(fountain.x, fountain.y);
-            return;
-        } else if (Math.hypot(this.hero.x - fountain.x, this.hero.y - fountain.y) < 150) {
-            if (this.hero.hp >= this.hero.maxHp) {
-                this.hero.moveTo(this.hero.team === 'radiant' ? 1000 : 7000, this.hero.y);
-            }
-            return;
+            this.hero.moveTo(this.fountain.x, this.fountain.y);
         }
 
-        let lane = this.determineLane();
-        this.currentLane = lane;
-        const enemies = this.hero.team === 'radiant' ? game.direEntities() : game.radiantEntities();
-        // Определяем примерную линию по y (для упрощения)
-        const laneY = this.getLaneY(lane);
-        let target = null;
-        let minDist = Infinity;
-        for (let e of enemies) {
-            if (e.isDead) continue;
-            if (!e.isAttackable()) continue;
-            // Проверяем, находится ли враг на той же линии (по близости к waypoints)
-            if (Math.abs(e.y - laneY) > 150) continue;
-            const d = Math.hypot(e.x - this.hero.x, e.y - this.hero.y);
-            if (d < minDist) {
-                minDist = d;
-                target = e;
-            }
-        }
-        if (target && minDist < 600) {
-            this.hero.attackTarget = target;
-        } else {
-            this.hero.attackTarget = null;
-            const waypoints = this.hero.team === 'radiant' ? game.map.waypoints[lane] : game.map.waypointsReverse[lane];
-            if (waypoints && waypoints.length > 0) {
-                const targetWp = waypoints[waypoints.length - 1];
-                this.hero.moveTo(targetWp.x, targetWp.y);
+        // Если на базе и здоровье не полное, лечимся
+        if (this.state === 'retreat' || this.state === 'heal') {
+            const dist = Math.hypot(hero.x - this.fountain.x, hero.y - this.fountain.y);
+            if (dist < this.fountain.radius) {
+                this.state = 'heal';
+                // Лечение
+                hero.hp = Math.min(hero.maxHp, hero.hp + 100 * dt);
+                if (hero.hp >= hero.maxHp) {
+                    // Полностью вылечились, возвращаемся на линию
+                    this.state = 'normal';
+                    this.hero.attackTarget = null;
+                    // Идём к первой waypoint
+                    if (this.waypoints && this.waypoints.length > 0) {
+                        this.waypointIndex = 0;
+                        this.hero.moveTo(this.waypoints[0].x, this.waypoints[0].y);
+                    }
+                }
+                // В режиме лечения не двигаемся
+                return;
+            } else {
+                // Если ещё не дошли до фонтана, продолжаем двигаться
+                // (но установлено moveTo в retreat)
+                // Здесь ничего не делаем, движение уже задано
             }
         }
 
-        if (this.hero instanceof Huskar) {
-            if (!this.hero.burningSpearActive) this.hero.useAbility(1);
-            if (this.hero.abilities[0].currentCooldown === 0 && this.hero.hp > 200) {
-                let enemiesNear = enemies.filter(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 250);
-                if (enemiesNear.length > 0) this.hero.useAbility(0);
-            }
-            if (this.hero.abilities[3].currentCooldown === 0 && this.hero.hp > 300) {
-                let targetHero = enemies.find(e => e instanceof Hero && Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 500);
-                if (targetHero) {
-                    this.hero.attackTarget = targetHero;
-                    this.hero.useAbility(3);
+        // Если в нормальном режиме, выбираем цель и двигаемся
+        if (this.state === 'normal') {
+            // Поиск целей по приоритету
+            const target = this.selectTarget();
+            if (target) {
+                this.hero.attackTarget = target;
+                // Если цель в радиусе атаки, атакуем
+                const d = Math.hypot(this.hero.x - target.x, this.hero.y - target.y);
+                if (d <= this.hero.attackRange && this.hero.attackCooldown <= 0) {
+                    this.hero.performAttack();
+                    this.hero.attackCooldown = this.hero.attackSpeed;
+                }
+                // Если цель вне радиуса, двигаемся к ней
+                if (d > this.hero.attackRange * 0.85) {
+                    this.hero.moveTo(target.x, target.y);
+                }
+            } else {
+                // Нет целей, двигаемся по waypoints
+                this.hero.attackTarget = null;
+                if (this.waypoints && this.waypoints.length > 0) {
+                    // Если достигли последней waypoint, остаёмся на месте
+                    if (this.waypointIndex >= this.waypoints.length) {
+                        // Ничего не делаем, стоим
+                    } else {
+                        const wp = this.waypoints[this.waypointIndex];
+                        const dist = Math.hypot(this.hero.x - wp.x, this.hero.y - wp.y);
+                        if (dist < 20) {
+                            this.waypointIndex++;
+                            if (this.waypointIndex < this.waypoints.length) {
+                                this.hero.moveTo(this.waypoints[this.waypointIndex].x, this.waypoints[this.waypointIndex].y);
+                            }
+                        } else {
+                            this.hero.moveTo(wp.x, wp.y);
+                        }
+                    }
                 }
             }
         }
-    }
 
-    getLaneY(lane) {
-        // Приблизительный y для линии (используем первую waypoint)
-        const wps = game.map.waypoints[lane];
-        if (wps && wps.length > 0) {
-            return wps[0].y;
+        // Обновление кулдауна атаки
+        if (this.hero.attackCooldown > 0) {
+            this.hero.attackCooldown -= dt;
         }
-        return 3000;
-    }
 
-    determineLane() {
-        // Определяем ближайшую линию по расстоянию до waypoints
-        const hero = this.hero;
-        let closest = 'mid';
-        let minDist = Infinity;
-        for (let lane of ['top', 'mid', 'bottom']) {
-            const wps = game.map.waypoints[lane];
-            if (!wps || wps.length === 0) continue;
-            // Считаем расстояние до первой точки
-            const d = Math.hypot(hero.x - wps[0].x, hero.y - wps[0].y);
-            if (d < minDist) {
-                minDist = d;
-                closest = lane;
-            }
-        }
-        return closest;
-    }
-
-    buyLogic() {
+        // Покупка предметов (как в старом AI)
+        // Можно добавить простую логику
         if (this.hero.gold >= 1500) {
             let i = new Item('sword', 'Crystalys', 1500, { damageBonus: 32, critChance: 0.3, critMultiplier: 1.6 });
-            if (this.hero.inventory.addItem(i)) this.hero.gold -= 1500;
+            if (this.hero.inventory.addItem(i)) {
+                this.hero.gold -= 1500;
+                audio.play('buy');
+            }
         }
+    }
+
+    selectTarget() {
+        const hero = this.hero;
+        const enemies = hero.team === 'radiant' ? this.game.direEntities() : this.game.radiantEntities();
+
+        // 1. Вражеские крипы в радиусе атаки
+        const attackRange = hero.attackRange * 1.2;
+        let closestCreep = null;
+        let minDistCreep = Infinity;
+        for (let e of enemies) {
+            if (e.isDead || !e.isAttackable()) continue;
+            if (!(e instanceof Creep)) continue;
+            const d = Math.hypot(e.x - hero.x, e.y - hero.y);
+            if (d <= attackRange && d < minDistCreep) {
+                minDistCreep = d;
+                closestCreep = e;
+            }
+        }
+        if (closestCreep) return closestCreep;
+
+        // 2. Вражеские герои в радиусе атаки
+        let closestHero = null;
+        let minDistHero = Infinity;
+        for (let e of enemies) {
+            if (e.isDead || !e.isAttackable()) continue;
+            if (!(e instanceof Hero)) continue;
+            const d = Math.hypot(e.x - hero.x, e.y - hero.y);
+            if (d <= attackRange && d < minDistHero) {
+                minDistHero = d;
+                closestHero = e;
+            }
+        }
+        if (closestHero) return closestHero;
+
+        // 3. Вражеские строения (башни, бараки, трон) – выбираем ближайшее
+        let closestBuilding = null;
+        let minDistBuilding = Infinity;
+        // Башни
+        for (let t of this.game.towers) {
+            if (t.team === hero.team || t.isDead || !t.isAttackable()) continue;
+            const d = Math.hypot(t.x - hero.x, t.y - hero.y);
+            if (d < minDistBuilding) {
+                minDistBuilding = d;
+                closestBuilding = t;
+            }
+        }
+        // Бараки
+        for (let b of this.game.barracks) {
+            if (b.team === hero.team || b.isDead || !b.isAttackable()) continue;
+            const d = Math.hypot(b.x - hero.x, b.y - hero.y);
+            if (d < minDistBuilding) {
+                minDistBuilding = d;
+                closestBuilding = b;
+            }
+        }
+        // Трон
+        for (let a of this.game.ancients) {
+            if (a.team === hero.team || a.isDead || !a.isAttackable()) continue;
+            const d = Math.hypot(a.x - hero.x, a.y - hero.y);
+            if (d < minDistBuilding) {
+                minDistBuilding = d;
+                closestBuilding = a;
+            }
+        }
+
+        // Если строение в радиусе атаки или просто ближайшее, атакуем его
+        if (closestBuilding && minDistBuilding <= attackRange) {
+            return closestBuilding;
+        }
+
+        // Если нет целей в радиусе, возвращаем null
+        return null;
     }
 }
 
@@ -2513,6 +2593,19 @@ class UIManager {
             mCtx.fillStyle = b.team === 'radiant' ? '#66ff66' : '#ff6666';
             mCtx.beginPath(); mCtx.arc(pos.x, pos.y, 2, 0, Math.PI*2); mCtx.fill();
         }
+        // Боты
+        for (let bot of game.alliedBots) {
+            if (bot.isDead) continue;
+            const pos = toM(bot.x, bot.y);
+            mCtx.fillStyle = '#00ddff';
+            mCtx.beginPath(); mCtx.arc(pos.x, pos.y, 2, 0, Math.PI*2); mCtx.fill();
+        }
+        for (let bot of game.enemyBots) {
+            if (bot.isDead) continue;
+            const pos = toM(bot.x, bot.y);
+            mCtx.fillStyle = '#ff44aa';
+            mCtx.beginPath(); mCtx.arc(pos.x, pos.y, 2, 0, Math.PI*2); mCtx.fill();
+        }
     }
 }
 
@@ -2526,7 +2619,8 @@ class Game {
         this.uiManager = new UIManager();
         this.playerHero = null; 
         this.enemyHero = null; 
-        this.aiController = null;
+        this.alliedBots = []; // союзные боты
+        this.enemyBots = [];  // вражеские боты
         this.creeps = []; 
         this.towers = []; 
         this.barracks = [];
@@ -2538,7 +2632,7 @@ class Game {
         this.matchTime = 0; 
         this.creepTimer = 0; 
         this.lastTime = performance.now();
-        this.globalSpeedMultiplier = 0.75; 
+        this.globalSpeedMultiplier = 0.1; 
         this.glyphCooldown = { radiant: 0, dire: 0 }; 
         this.glyphMaxCooldown = 60;
         this.glyphActive = { radiant: false, dire: false }; 
@@ -2563,7 +2657,6 @@ class Game {
         this.fountains.push(new Fountain(this.map.direBase.x + 100, this.map.direBase.y - 100, 'dire'));
 
         // Координаты башен (T1, T2, T3) для каждой линии
-        // Для Mid используем правильное расположение: трон -> бараки -> T3 -> T2 -> T1
         const laneData = {
             top: {
                 towers: {
@@ -2577,9 +2670,7 @@ class Game {
             },
             mid: {
                 towers: {
-                    // Radiant: трон (500,5500) -> бараки на 5% -> T3 на 15% -> T2 на 30% -> T1 на 45%
                     radiant: [{x: 3650, y: 3475}, {x: 2600, y: 4150}, {x: 1550, y: 4825}],
-                    // Dire: трон (7500,1000) -> бараки на 5% -> T3 на 15% -> T2 на 30% -> T1 на 45%
                     dire:    [{x: 4350, y: 3025}, {x: 5400, y: 2350}, {x: 6450, y: 1675}]
                 },
                 barracks: {
@@ -2599,29 +2690,24 @@ class Game {
             }
         };
 
-        // Для каждой линии создаём башни и бараки
         const lanes = ['top', 'mid', 'bottom'];
         for (let lane of lanes) {
             const data = laneData[lane];
-            // Radiant башни
             for (let i = 0; i < 3; i++) {
                 const pos = data.towers.radiant[i];
                 const tower = new Tower(pos.x, pos.y, 'radiant', i+1);
                 tower.lane = lane;
                 this.towers.push(tower);
             }
-            // Dire башни
             for (let i = 0; i < 3; i++) {
                 const pos = data.towers.dire[i];
                 const tower = new Tower(pos.x, pos.y, 'dire', i+1);
                 tower.lane = lane;
                 this.towers.push(tower);
             }
-            // Бараки Radiant
             const bPosR = data.barracks.radiant;
             this.barracks.push(new Barracks(bPosR.x, bPosR.y - 20, 'radiant', 'melee', lane));
             this.barracks.push(new Barracks(bPosR.x, bPosR.y + 20, 'radiant', 'ranged', lane));
-            // Бараки Dire
             const bPosD = data.barracks.dire;
             this.barracks.push(new Barracks(bPosD.x, bPosD.y - 20, 'dire', 'melee', lane));
             this.barracks.push(new Barracks(bPosD.x, bPosD.y + 20, 'dire', 'ranged', lane));
@@ -2632,8 +2718,36 @@ class Game {
         audio.init();
         this.playerHero = this.createHero(selectedHeroName, this.map.radiantBase.x, this.map.radiantBase.y, 'radiant');
         const pool = ['Morphling', 'Warlock', 'Sniper', 'Bristleback', 'Huskar'];
+        // Враг на мид
         this.enemyHero = this.createHero(pool[Math.floor(Math.random() * pool.length)], this.map.direBase.x, this.map.direBase.y, 'dire');
-        this.aiController = new AIController(this.enemyHero);
+        // Создаём AI для врага
+        this.enemyHero.ai = new BotAI(this.enemyHero, 'mid', this);
+
+        // Создаём союзных ботов: 2 на Top, 2 на Bottom
+        const alliedLanes = ['top', 'bottom'];
+        for (let lane of alliedLanes) {
+            for (let i = 0; i < 2; i++) {
+                const name = pool[Math.floor(Math.random() * pool.length)];
+                const x = this.map.radiantBase.x + 100 + i * 80;
+                const y = this.map.radiantBase.y - 100 + i * 80;
+                const hero = this.createHero(name, x, y, 'radiant');
+                hero.ai = new BotAI(hero, lane, this);
+                this.alliedBots.push(hero);
+            }
+        }
+
+        // Создаём вражеских ботов: 2 на Top, 2 на Bottom
+        for (let lane of alliedLanes) {
+            for (let i = 0; i < 2; i++) {
+                const name = pool[Math.floor(Math.random() * pool.length)];
+                const x = this.map.direBase.x - 100 - i * 80;
+                const y = this.map.direBase.y + 100 + i * 80;
+                const hero = this.createHero(name, x, y, 'dire');
+                hero.ai = new BotAI(hero, lane, this);
+                this.enemyBots.push(hero);
+            }
+        }
+
         document.getElementById('hero-selection').classList.add('hidden');
         document.getElementById('game-screen').classList.remove('hidden');
         this.lastTime = performance.now(); 
@@ -2649,31 +2763,27 @@ class Game {
     }
 
     radiantEntities() {
-        return [this.playerHero, ...this.creeps.filter(c => c.team==='radiant'), ...this.towers.filter(t => t.team==='radiant'), ...this.ancients.filter(a => a.team==='radiant')].filter(e => e && !e.isDead);
+        return [this.playerHero, ...this.alliedBots, ...this.creeps.filter(c => c.team==='radiant'), ...this.towers.filter(t => t.team==='radiant'), ...this.ancients.filter(a => a.team==='radiant')].filter(e => e && !e.isDead);
     }
 
     direEntities() {
-        return [this.enemyHero, ...this.creeps.filter(c => c.team==='dire'), ...this.towers.filter(t => t.team==='dire'), ...this.ancients.filter(a => a.team==='dire')].filter(e => e && !e.isDead);
+        return [this.enemyHero, ...this.enemyBots, ...this.creeps.filter(c => c.team==='dire'), ...this.towers.filter(t => t.team==='dire'), ...this.ancients.filter(a => a.team==='dire')].filter(e => e && !e.isDead);
     }
 
     spawnWave() {
         this.waveNumber++;
         const lanes = ['top', 'mid', 'bottom'];
         for (let lane of lanes) {
-            // Определяем начальные точки для Radiant и Dire на этой линии (первые waypoints)
             const radiantWp = this.map.waypoints[lane][0];
             const direWp = this.map.waypointsReverse[lane][0];
-            // Смещения для нескольких крипов
             for (let i = 0; i < 3; i++) {
                 const offsetX = i * 20 - 20;
                 const offsetY = i * 15 - 15;
                 this.creeps.push(new Creep(radiantWp.x + offsetX, radiantWp.y + offsetY, 'radiant', 'melee', lane));
                 this.creeps.push(new Creep(direWp.x + offsetX, direWp.y + offsetY, 'dire', 'melee', lane));
             }
-            // Рейндж крип
             this.creeps.push(new Creep(radiantWp.x - 30, radiantWp.y - 20, 'radiant', 'ranged', lane));
             this.creeps.push(new Creep(direWp.x + 30, direWp.y + 20, 'dire', 'ranged', lane));
-            // Катапульта каждые 3 волны
             if (this.waveNumber % 3 === 0) {
                 this.creeps.push(new Catapult(radiantWp.x - 50, radiantWp.y - 30, 'radiant', lane));
                 this.creeps.push(new Catapult(direWp.x + 50, direWp.y + 30, 'dire', lane));
@@ -2712,21 +2822,19 @@ class Game {
             let enemyTeam = player.team === 'radiant' ? 'dire' : 'radiant';
 
             let possibleTargets = [];
-            // вражеский герой
             if (this.enemyHero && !this.enemyHero.isDead && this.enemyHero.isAttackable()) possibleTargets.push(this.enemyHero);
-            // вражеские крипы
+            for (let bot of this.enemyBots) {
+                if (!bot.isDead && bot.isAttackable()) possibleTargets.push(bot);
+            }
             for (let c of this.creeps) {
                 if (c.team === enemyTeam && !c.isDead && c.isAttackable()) possibleTargets.push(c);
             }
-            // вражеские башни
             for (let t of this.towers) {
                 if (t.team === enemyTeam && !t.isDead && t.isAttackable()) possibleTargets.push(t);
             }
-            // вражеские бараки
             for (let b of this.barracks) {
                 if (b.team === enemyTeam && !b.isDead && b.isAttackable()) possibleTargets.push(b);
             }
-            // вражеские древние
             for (let a of this.ancients) {
                 if (a.team === enemyTeam && !a.isDead && a.isAttackable()) possibleTargets.push(a);
             }
@@ -2797,7 +2905,7 @@ class Game {
 
     buyItem(type) {
         let p = this.playerHero; let it = null;
-        if (type === 'boots') it = new Item('boots', 'Boots of Speed', 500, { speedBonus: 30 });
+        if (type === 'boots') it = new Item('boots', 'Boots of Speed', 500, { speedBonus: 40 });
         if (type === 'sword') it = new Item('sword', 'Crystalys', 1500, { damageBonus: 32, critChance: 0.3, critMultiplier: 1.6 });
         if (type === 'vitality') it = new Item('vitality', 'Vitality Booster', 1000, { hp: 250 });
         if (type === 'ringhealth') it = new Item('ringhealth', 'Ring of Health', 400, { hpRegen: 4.5 });
@@ -2831,15 +2939,38 @@ class Game {
             }
         }
         if (this.creepTimer >= 30 || this.matchTime === dt) { this.spawnWave(); this.creepTimer = 0; }
-        this.playerHero.update(dt); this.enemyHero.update(dt); this.aiController.update(dt);
-        for (let i = this.creeps.length - 1; i >= 0; i--) { if (this.creeps[i].isDead) this.creeps.splice(i, 1); else this.creeps[i].update(dt); }
+
+        // Обновление героев
+        this.playerHero.update(dt);
+        this.enemyHero.update(dt);
+        if (this.enemyHero.ai) this.enemyHero.ai.update(dt);
+
+        // Обновление союзных ботов
+        for (let bot of this.alliedBots) {
+            bot.update(dt);
+            if (bot.ai) bot.ai.update(dt);
+        }
+        // Обновление вражеских ботов
+        for (let bot of this.enemyBots) {
+            bot.update(dt);
+            if (bot.ai) bot.ai.update(dt);
+        }
+
+        // Обновление крипов
+        for (let i = this.creeps.length - 1; i >= 0; i--) {
+            if (this.creeps[i].isDead) this.creeps.splice(i, 1);
+            else this.creeps[i].update(dt);
+        }
+
         for (let t of this.towers) t.update(dt);
         for (let b of this.barracks) b.update(dt);
         if (this.bountyRunes) {
             for (let rune of this.bountyRunes) rune.update(dt);
         }
         for (let f of this.fountains) f.update(dt);
-        for (let i = this.projectiles.length - 1; i >= 0; i--) { if (this.projectiles[i].update(dt)) this.projectiles.splice(i, 1); }
+        for (let i = this.projectiles.length - 1; i >= 0; i--) {
+            if (this.projectiles[i].update(dt)) this.projectiles.splice(i, 1);
+        }
         for (let i = this.shrapnelZones.length - 1; i >= 0; i--) {
             if (this.shrapnelZones[i].update(dt)) this.shrapnelZones.splice(i, 1);
         }
@@ -2847,11 +2978,14 @@ class Game {
             this.effects[i].life -= dt;
             if (this.effects[i].life <= 0) this.effects.splice(i, 1);
         }
-        this.camera.update(this.playerHero.x, this.playerHero.y); this.uiManager.update(dt);
+
+        this.camera.update(this.playerHero.x, this.playerHero.y);
+        this.uiManager.update(dt);
     }
 
     render() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height); this.map.draw(ctx, this.camera);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        this.map.draw(ctx, this.camera);
         for (let zone of this.shrapnelZones) zone.draw(ctx, this.camera);
         for (let f of this.fountains) f.draw(ctx, this.camera);
         for (let t of this.towers) t.draw(ctx, this.camera);
@@ -2861,7 +2995,13 @@ class Game {
         }
         for (let a of this.ancients) a.draw(ctx, this.camera);
         for (let c of this.creeps) c.draw(ctx, this.camera);
-        this.playerHero.draw(ctx, this.camera); this.enemyHero.draw(ctx, this.camera);
+
+        // Отрисовка героев
+        this.playerHero.draw(ctx, this.camera);
+        this.enemyHero.draw(ctx, this.camera);
+        for (let bot of this.alliedBots) bot.draw(ctx, this.camera);
+        for (let bot of this.enemyBots) bot.draw(ctx, this.camera);
+
         for (let p of this.projectiles) p.draw(ctx, this.camera);
         for (let e of this.effects) {
             if (e.type === 'linkens') {
