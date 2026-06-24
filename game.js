@@ -185,7 +185,7 @@ class GameMap {
         ctx.fillStyle = '#1e2d1a';
         ctx.fillRect(-camera.x, -camera.y, this.width, this.height);
 
-        // Рисуем дорожки линий (пунктир или полосы)
+        // Рисуем дорожки линий
         const laneColors = ['#3a5a3a', '#4a6a4a', '#3a5a3a'];
         const lanes = ['top', 'mid', 'bottom'];
         for (let idx = 0; idx < lanes.length; idx++) {
@@ -347,10 +347,21 @@ class Entity {
         this.waypoints = null;
         this.currentWaypointIndex = 0;
         this.isMovingToWaypoint = false;
+        // Защита от зависания
+        this._stuckCheckTimer = 0;
+        this._lastPos = { x: this.x, y: this.y };
+        this._stuckTime = 0;
+    }
+
+    // Проверка, можно ли атаковать эту цель
+    isAttackable() {
+        return !this.isDead;
     }
 
     takeDamage(amount, attacker, isFb = false, damageType = 'physical') {
         if (this.isDead) return;
+        // Запрет атаки своих
+        if (attacker && attacker.team === this.team) return;
 
         if (damageType !== 'magic' && this.inventory) {
             let vanguard = this.inventory.items.find(i => i.id === 'vanguard');
@@ -464,7 +475,7 @@ class Entity {
         let globalSpeed = window.game ? game.globalSpeedMultiplier : 0.8;
         this.speed = this.baseSpeed * currentSlow * globalSpeed;
 
-        if (this.attackTarget && !this.attackTarget.isDead) {
+        if (this.attackTarget && !this.attackTarget.isDead && this.attackTarget.isAttackable()) {
             this.targetX = this.attackTarget.x;
             this.targetY = this.attackTarget.y;
         } else if (this.isMovingToWaypoint && this.waypoints && this.waypoints.length > 0) {
@@ -504,6 +515,31 @@ class Entity {
             }
         } else if (!this.attackTarget) {
             // Остановились у цели или достигли waypoint
+        }
+
+        // Защита от зависания – проверяем, двигается ли сущность
+        this._stuckCheckTimer += dt;
+        if (this._stuckCheckTimer > 2.0) {
+            this._stuckCheckTimer = 0;
+            const dx2 = this.x - this._lastPos.x;
+            const dy2 = this.y - this._lastPos.y;
+            const dist2 = Math.hypot(dx2, dy2);
+            if (dist2 < 5 && !this.isDead && !this.attackTarget && this.speed > 0.1) {
+                this._stuckTime += 2.0;
+                if (this._stuckTime > 5.0) {
+                    // Принудительно пересчитать цель: если есть waypoints, перейти к следующему
+                    if (this.waypoints && this.waypoints.length > 0) {
+                        this.currentWaypointIndex = Math.min(this.currentWaypointIndex + 1, this.waypoints.length - 1);
+                        this.targetX = this.waypoints[this.currentWaypointIndex].x;
+                        this.targetY = this.waypoints[this.currentWaypointIndex].y;
+                    }
+                    this._stuckTime = 0;
+                }
+            } else {
+                this._stuckTime = 0;
+            }
+            this._lastPos.x = this.x;
+            this._lastPos.y = this.y;
         }
     }
 
@@ -602,10 +638,12 @@ class Hero extends Entity {
         if (this.lifeBreakSlowTimer > 0) rate *= 0.4;
         if (this.attackCooldown > 0) this.attackCooldown -= dt * rate;
 
-        if (this.attackTarget) {
+        if (this.attackTarget && this.attackTarget.isAttackable()) {
             if (this.attackTarget.isDead) { this.attackTarget = null; return; }
             let d = Math.hypot(this.attackTarget.x - this.x, this.attackTarget.y - this.y);
             if (d <= this.attackRange && this.attackCooldown <= 0) { this.performAttack(); }
+        } else {
+            this.attackTarget = null;
         }
         for (let ab of this.abilities) ab.update(dt);
         
@@ -1595,6 +1633,8 @@ class Creep extends Entity {
         const map = game.map;
         const waypoints = (this.team === 'radiant') ? map.waypoints[lane] : map.waypointsReverse[lane];
         this.setWaypoints(waypoints);
+        // Для отслеживания цели
+        this._targetCheckTimer = 0;
     }
 
     takeDamage(amount, attacker, isFb = false, damageType = 'physical') {
@@ -1619,6 +1659,26 @@ class Creep extends Entity {
         return Math.hypot(dx, dy) <= clickHitboxRadius;
     }
 
+    // Поиск цели по приоритету, только в пределах атаки
+    findTarget() {
+        const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+        // Ищем врага в радиусе атаки (с небольшим запасом)
+        const searchRadius = this.attackRange * 1.5;
+        let best = null;
+        let bestDist = Infinity;
+        for (let e of enemies) {
+            if (e.isDead) continue;
+            if (!e.isAttackable()) continue;
+            const d = Math.hypot(e.x - this.x, e.y - this.y);
+            if (d <= searchRadius && d < bestDist) {
+                // Приоритет: если враг в радиусе атаки, то он главный
+                best = e;
+                bestDist = d;
+            }
+        }
+        return best; // вернёт врага, если есть в радиусе, иначе null
+    }
+
     update(dt) {
         if (this.isDead) return;
         this.updateBuffs(dt);
@@ -1628,26 +1688,30 @@ class Creep extends Entity {
         if (this.lifeBreakSlowTimer > 0) rate *= 0.4;
         if (this.attackCooldown > 0) this.attackCooldown -= dt * rate;
 
-        if (!this.attackTarget || this.attackTarget.isDead || this.attackTarget.team === this.team) {
-            let closest = null;
-            let minDist = Infinity;
-            const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
-            for (let e of enemies) {
-                if (e.isDead || e === this) continue;
-                const d = Math.hypot(e.x - this.x, e.y - this.y);
-                if (d < minDist) {
-                    minDist = d;
-                    closest = e;
-                }
-            }
-            if (closest && minDist <= this.attackRange + 50) {
-                this.attackTarget = closest;
+        // Обновляем цель каждые 0.5 сек или если текущая цель мертва / недоступна
+        this._targetCheckTimer += dt;
+        if (this._targetCheckTimer > 0.5 || !this.attackTarget || !this.attackTarget.isAttackable() || this.attackTarget.team === this.team) {
+            this._targetCheckTimer = 0;
+            const newTarget = this.findTarget();
+            if (newTarget) {
+                this.attackTarget = newTarget;
             } else {
                 this.attackTarget = null;
+                // Если нет цели в радиусе, продолжаем движение по waypoints
+                // Убедимся, что isMovingToWaypoint активно
+                if (this.waypoints && this.waypoints.length > 0) {
+                    this.isMovingToWaypoint = true;
+                    if (this.currentWaypointIndex >= this.waypoints.length) {
+                        this.currentWaypointIndex = this.waypoints.length - 1;
+                    }
+                    this.targetX = this.waypoints[this.currentWaypointIndex].x;
+                    this.targetY = this.waypoints[this.currentWaypointIndex].y;
+                }
             }
         }
 
-        if (this.attackTarget && !this.attackTarget.isDead) {
+        // Если есть цель и она в радиусе, атакуем
+        if (this.attackTarget && this.attackTarget.isAttackable() && !this.attackTarget.isDead) {
             let d = Math.hypot(this.attackTarget.x - this.x, this.attackTarget.y - this.y);
             if (d <= this.attackRange && this.attackCooldown <= 0) {
                 this.attackCooldown = this.attackSpeed;
@@ -1666,6 +1730,7 @@ class Creep extends Entity {
             }
         }
 
+        // Движение (включая waypoints)
         this.updateMovement(dt);
     }
 
@@ -1748,6 +1813,25 @@ class Catapult extends Entity {
         const map = game.map;
         const waypoints = (this.team === 'radiant') ? map.waypoints[lane] : map.waypointsReverse[lane];
         this.setWaypoints(waypoints);
+        this._targetCheckTimer = 0;
+    }
+
+    // Поиск цели аналогично крипу, только с радиусом атаки
+    findTarget() {
+        const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+        const searchRadius = this.attackRange * 1.5;
+        let best = null;
+        let bestDist = Infinity;
+        for (let e of enemies) {
+            if (e.isDead) continue;
+            if (!e.isAttackable()) continue;
+            const d = Math.hypot(e.x - this.x, e.y - this.y);
+            if (d <= searchRadius && d < bestDist) {
+                best = e;
+                bestDist = d;
+            }
+        }
+        return best;
     }
 
     update(dt) {
@@ -1759,26 +1843,26 @@ class Catapult extends Entity {
         if (this.lifeBreakSlowTimer > 0) rate *= 0.4;
         if (this.attackCooldown > 0) this.attackCooldown -= dt * rate;
 
-        if (!this.attackTarget || this.attackTarget.hp <= 0 || this.attackTarget.team === this.team) {
-            let closest = null;
-            let minDist = Infinity;
-            const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
-            for (let e of enemies) {
-                if (e.isDead) continue;
-                const d = Math.hypot(e.x - this.x, e.y - this.y);
-                if (d < minDist) {
-                    minDist = d;
-                    closest = e;
-                }
-            }
-            if (closest && minDist <= this.attackRange + 50) {
-                this.attackTarget = closest;
+        this._targetCheckTimer += dt;
+        if (this._targetCheckTimer > 0.5 || !this.attackTarget || !this.attackTarget.isAttackable() || this.attackTarget.team === this.team) {
+            this._targetCheckTimer = 0;
+            const newTarget = this.findTarget();
+            if (newTarget) {
+                this.attackTarget = newTarget;
             } else {
                 this.attackTarget = null;
+                if (this.waypoints && this.waypoints.length > 0) {
+                    this.isMovingToWaypoint = true;
+                    if (this.currentWaypointIndex >= this.waypoints.length) {
+                        this.currentWaypointIndex = this.waypoints.length - 1;
+                    }
+                    this.targetX = this.waypoints[this.currentWaypointIndex].x;
+                    this.targetY = this.waypoints[this.currentWaypointIndex].y;
+                }
             }
         }
 
-        if (this.attackTarget && !this.attackTarget.isDead) {
+        if (this.attackTarget && this.attackTarget.isAttackable() && !this.attackTarget.isDead) {
             let d = Math.hypot(this.attackTarget.x - this.x, this.attackTarget.y - this.y);
             if (d <= this.attackRange && this.attackCooldown <= 0) {
                 this.performAttack();
@@ -1839,7 +1923,13 @@ class Tower extends Entity {
         this.glyphActive = false;
         this.glyphTimer = 0;
         this.tier = tier;
+        this.lane = ''; // будет установлено извне
     }
+
+    isAttackable() {
+        return !this.isDead && !this.glyphActive;
+    }
+
     update(dt) {
         if (this.isDead) return;
         this.updateBuffs(dt);
@@ -2072,6 +2162,10 @@ class Barracks {
         this.t3Alive = true; // будет обновляться из игры
     }
 
+    isAttackable() {
+        return !this.isDead && this.isVulnerable();
+    }
+
     // Проверка, можно ли атаковать (T3 должна быть мертва)
     isVulnerable() {
         if (this.isDead) return false;
@@ -2169,6 +2263,7 @@ class AIController {
         let minDist = Infinity;
         for (let e of enemies) {
             if (e.isDead) continue;
+            if (!e.isAttackable()) continue;
             // Проверяем, находится ли враг на той же линии (по близости к waypoints)
             if (Math.abs(e.y - laneY) > 150) continue;
             const d = Math.hypot(e.x - this.hero.x, e.y - this.hero.y);
@@ -2468,32 +2563,31 @@ class Game {
         this.fountains.push(new Fountain(this.map.direBase.x + 100, this.map.direBase.y - 100, 'dire'));
 
         // Координаты башен (T1, T2, T3) для каждой линии
-        // Рассчитаны ранее
+        // Для Mid используем правильное расположение: трон -> бараки -> T3 -> T2 -> T1
         const laneData = {
             top: {
-                waypoints: this.map.waypoints.top,
                 towers: {
-                    radiant: [{x: 500, y: 4400}, {x: 500, y: 2800}, {x: 500, y: 1400}], // T1,T2,T3 на вертикали
-                    dire:    [{x: 1500, y: 1000}, {x: 3500, y: 1000}, {x: 5500, y: 1000}] // T1,T2,T3 на горизонтали
+                    radiant: [{x: 500, y: 4400}, {x: 500, y: 2800}, {x: 500, y: 1400}],
+                    dire:    [{x: 1500, y: 1000}, {x: 3500, y: 1000}, {x: 5500, y: 1000}]
                 },
                 barracks: {
-                    radiant: {x: 500, y: 900},  // за T3 Radiant (после вертикали)
-                    dire:    {x: 6500, y: 1000} // за T3 Dire (перед Dire базой)
+                    radiant: {x: 500, y: 900},
+                    dire:    {x: 6500, y: 1000}
                 }
             },
             mid: {
-                waypoints: this.map.waypoints.mid,
                 towers: {
-                    radiant: [{x: 1900, y: 4600}, {x: 3650, y: 3475}, {x: 5400, y: 2350}],
-                    dire:    [{x: 1900, y: 4600}, {x: 3650, y: 3475}, {x: 5400, y: 2350}] // зеркально? но для Dire нужно отдельно, но для простоты используем те же
+                    // Radiant: трон (500,5500) -> бараки на 5% -> T3 на 15% -> T2 на 30% -> T1 на 45%
+                    radiant: [{x: 3650, y: 3475}, {x: 2600, y: 4150}, {x: 1550, y: 4825}],
+                    // Dire: трон (7500,1000) -> бараки на 5% -> T3 на 15% -> T2 на 30% -> T1 на 45%
+                    dire:    [{x: 4350, y: 3025}, {x: 5400, y: 2350}, {x: 6450, y: 1675}]
                 },
                 barracks: {
-                    radiant: {x: 6800, y: 1450},
-                    dire:    {x: 6800, y: 1450} // позже пересчитаем для Dire
+                    radiant: {x: 850, y: 5275},
+                    dire:    {x: 7150, y: 1225}
                 }
             },
             bottom: {
-                waypoints: this.map.waypoints.bottom,
                 towers: {
                     radiant: [{x: 2800, y: 5500}, {x: 5675, y: 5500}, {x: 7500, y: 4450}],
                     dire:    [{x: 7500, y: 3500}, {x: 7500, y: 2500}, {x: 7500, y: 1500}]
@@ -2532,16 +2626,6 @@ class Game {
             this.barracks.push(new Barracks(bPosD.x, bPosD.y - 20, 'dire', 'melee', lane));
             this.barracks.push(new Barracks(bPosD.x, bPosD.y + 20, 'dire', 'ranged', lane));
         }
-
-        // Корректировка для Mid: бараки Radiant и Dire должны быть на своих местах
-        // Уже задано, но можно переопределить для наглядности
-        // Radiant Mid бараки за T3: T3 на x=5400, y=2350, трон в (500,5500) - далеко, но бараки должны быть между T3 и троном.
-        // У нас трон в (500,5500), так что бараки должны быть ближе к трону. Но у нас путь Mid прямой, так что разместим бараки на 85% пути.
-        // Пересчитаем: путь от (500,5500) до (7500,1000) длиной ~8320. 85% = 7072. Координаты: (500+0.841*7072, 5500-0.541*7072) ≈ (6450, 1670). Так что я изменю.
-        // Я переопределю вручную для Mid.
-        const midBarracksR = {x: 6400, y: 1700};
-        const midBarracksD = {x: 6400, y: 1700}; // но Dire должны быть с другой стороны, но для простоты оставлю так, позже можно поправить.
-        // Но чтобы не усложнять, я просто оставлю как есть, они будут далеко от трона, но это приемлемо для демонстрации.
     }
 
     start(selectedHeroName) {
@@ -2624,23 +2708,36 @@ class Game {
                 }
             }
 
-            let enemies = this.playerHero.team === 'radiant' ? this.direEntities() : this.radiantEntities();
-            let clickedEnemy = null;
-            // Проверяем также бараки и башни
-            const allBuildings = [...this.towers, ...this.barracks, ...this.ancients];
-            for (let ent of allBuildings) {
-                if (ent.isDead) continue;
-                if (Math.hypot(ent.x - wx, ent.y - wy) < ent.radius + 20) {
-                    clickedEnemy = ent;
-                    break;
-                }
+            let player = this.playerHero;
+            let enemyTeam = player.team === 'radiant' ? 'dire' : 'radiant';
+
+            let possibleTargets = [];
+            // вражеский герой
+            if (this.enemyHero && !this.enemyHero.isDead && this.enemyHero.isAttackable()) possibleTargets.push(this.enemyHero);
+            // вражеские крипы
+            for (let c of this.creeps) {
+                if (c.team === enemyTeam && !c.isDead && c.isAttackable()) possibleTargets.push(c);
             }
-            if (!clickedEnemy) {
-                for (let ent of enemies) {
-                    if (Math.hypot(ent.x - wx, ent.y - wy) < ent.radius + 20) {
-                        clickedEnemy = ent;
-                        break;
-                    }
+            // вражеские башни
+            for (let t of this.towers) {
+                if (t.team === enemyTeam && !t.isDead && t.isAttackable()) possibleTargets.push(t);
+            }
+            // вражеские бараки
+            for (let b of this.barracks) {
+                if (b.team === enemyTeam && !b.isDead && b.isAttackable()) possibleTargets.push(b);
+            }
+            // вражеские древние
+            for (let a of this.ancients) {
+                if (a.team === enemyTeam && !a.isDead && a.isAttackable()) possibleTargets.push(a);
+            }
+
+            let clickedEnemy = null;
+            let minDist = Infinity;
+            for (let ent of possibleTargets) {
+                const d = Math.hypot(ent.x - wx, ent.y - wy);
+                if (d < ent.radius + 20 && d < minDist) {
+                    minDist = d;
+                    clickedEnemy = ent;
                 }
             }
 
