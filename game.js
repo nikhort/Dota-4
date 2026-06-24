@@ -597,7 +597,7 @@ class Hero extends Entity {
     constructor(x, y, team, name) {
         super(x, y, team, 22, 600, 54, 275);
         this.name = name; this.level = 1; this.xp = 0; this.maxXp = 100;
-        this.mp = 300; this.maxMp = 300; this.gold = 100; 
+        this.mp = 300; this.maxMp = 300; this.gold = 5000; 
         this.inventory = new Inventory(this); this.abilities = [];
         this.hpRegenBase = 2.0; this.mpRegenBase = 1.5; this.invulnerable = false;
         this.inventoryHpRegen = 0; this.inventoryManaRegen = 0;
@@ -610,7 +610,7 @@ class Hero extends Entity {
             const heart = this.inventory.items.find(item => item.id === 'heart');
             if (heart) {
                 const missing = this.maxHp - this.hp;
-                regen += missing * 0.015;
+                regen += missing * 0.060;
             }
         }
         return regen;
@@ -2144,7 +2144,8 @@ class Projectile {
     }
     update(dt) {
         if (!this.target || this.target.isDead) return true;
-        let dx = this.target.x - this.x; let dy = this.target.y - this.y;
+        let dx = this.target.x - this.x;
+        let dy = this.target.y - this.y;
         let dist = Math.hypot(dx, dy);
         if (dist < 12) {
             if (this.isHs) {
@@ -2736,7 +2737,7 @@ class Game {
         this.lastTime = performance.now();
         this.globalSpeedMultiplier = 0.75; 
         this.glyphCooldown = { radiant: 0, dire: 0 }; 
-        this.glyphMaxCooldown = 60;
+        this.glyphMaxCooldown = 120;
         this.glyphActive = { radiant: false, dire: false }; 
         this.glyphDuration = 8; 
         this.glyphTimer = { radiant: 0, dire: 0 };
@@ -2769,6 +2770,8 @@ class Game {
                 <p>Bonus: +12 HP regen</p>
             </div>
         `;
+        // Добавляем обработчик клика
+        ringItem.addEventListener('click', () => this.buyItem('ringtarrasque'));
         shopList.appendChild(ringItem);
 
         // Reaver
@@ -2783,9 +2786,8 @@ class Game {
                 <p>Bonus: +25 Health</p>
             </div>
         `;
+        reaverItem.addEventListener('click', () => this.buyItem('reaver'));
         shopList.appendChild(reaverItem);
-
-        // Также можно добавить информацию о сборке Heart, но не обязательно.
     }
 
     getAllHeroes() {
