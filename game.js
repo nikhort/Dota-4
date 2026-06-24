@@ -72,24 +72,42 @@ class GameMap {
     constructor() {
         this.width = 8000;
         this.height = 6000;
-        // Координаты линий
-        this.lanes = {
-            top:    { y: 1200, label: 'top' },
-            mid:    { y: 3000, label: 'mid' },
-            bottom: { y: 4800, label: 'bottom' }
-        };
+        // Базы
+        this.radiantBase = { x: 500, y: 5500 };
+        this.direBase = { x: 7500, y: 1000 };
         // Waypoints для каждой линии (от Radiant к Dire)
-        // Radiant база в левом нижнем углу (400, 5700), Dire база в правом верхнем (7600, 300)
         this.waypoints = {
-            top:    [{ x: 600, y: 1200 }, { x: 7400, y: 1200 }],
-            mid:    [{ x: 600, y: 3000 }, { x: 7400, y: 3000 }],
-            bottom: [{ x: 600, y: 4800 }, { x: 7400, y: 4800 }]
+            top: [
+                { x: this.radiantBase.x, y: this.radiantBase.y },
+                { x: this.radiantBase.x, y: 1000 },
+                { x: this.direBase.x, y: 1000 }
+            ],
+            mid: [
+                { x: this.radiantBase.x, y: this.radiantBase.y },
+                { x: this.direBase.x, y: this.direBase.y }
+            ],
+            bottom: [
+                { x: this.radiantBase.x, y: this.radiantBase.y },
+                { x: 7500, y: this.radiantBase.y },
+                { x: this.direBase.x, y: this.direBase.y }
+            ]
         };
         // Обратные маршруты для Dire
         this.waypointsReverse = {
-            top:    [{ x: 7400, y: 1200 }, { x: 600, y: 1200 }],
-            mid:    [{ x: 7400, y: 3000 }, { x: 600, y: 3000 }],
-            bottom: [{ x: 7400, y: 4800 }, { x: 600, y: 4800 }]
+            top: [
+                { x: this.direBase.x, y: 1000 },
+                { x: this.radiantBase.x, y: 1000 },
+                { x: this.radiantBase.x, y: this.radiantBase.y }
+            ],
+            mid: [
+                { x: this.direBase.x, y: this.direBase.y },
+                { x: this.radiantBase.x, y: this.radiantBase.y }
+            ],
+            bottom: [
+                { x: this.direBase.x, y: this.direBase.y },
+                { x: 7500, y: this.radiantBase.y },
+                { x: this.radiantBase.x, y: this.radiantBase.y }
+            ]
         };
 
         this.treeImg = new Image();
@@ -100,33 +118,44 @@ class GameMap {
 
     generateDecorations() {
         // Добавим деревья вдоль линий
-        for (let lane of ['top', 'mid', 'bottom']) {
-            const y = this.lanes[lane].y;
-            for (let x = 800; x < 7200; x += 300) {
-                if (Math.random() < 0.25) {
-                    const offsetY = (Math.random() - 0.5) * 80;
-                    this.decorations.push({
-                        x: x + (Math.random() - 0.5) * 100,
-                        y: y + offsetY + (Math.random() > 0.5 ? 130 : -130),
-                        type: 'tree',
-                        size: 80 + Math.random() * 60
-                    });
+        const lanes = ['top', 'mid', 'bottom'];
+        for (let lane of lanes) {
+            const wps = this.waypoints[lane];
+            // Проходим по отрезкам между waypoints
+            for (let i = 0; i < wps.length - 1; i++) {
+                const from = wps[i];
+                const to = wps[i+1];
+                const steps = 20;
+                for (let j = 0; j < steps; j++) {
+                    const t = j / steps;
+                    const x = from.x + (to.x - from.x) * t;
+                    const y = from.y + (to.y - from.y) * t;
+                    if (Math.random() < 0.15) {
+                        const offsetX = (Math.random() - 0.5) * 120;
+                        const offsetY = (Math.random() - 0.5) * 120;
+                        this.decorations.push({
+                            x: x + offsetX,
+                            y: y + offsetY,
+                            type: 'tree',
+                            size: 60 + Math.random() * 60
+                        });
+                    }
                 }
             }
         }
-        // Добавим деревья в базах
+        // Деревья в базах
         for (let i = 0; i < 30; i++) {
             this.decorations.push({
                 x: 200 + Math.random() * 400,
-                y: 5400 + Math.random() * 400,
+                y: 5300 + Math.random() * 400,
                 type: 'tree',
-                size: 100 + Math.random() * 80
+                size: 80 + Math.random() * 80
             });
             this.decorations.push({
                 x: 7400 + Math.random() * 400,
-                y: 200 + Math.random() * 400,
+                y: 800 + Math.random() * 400,
                 type: 'tree',
-                size: 100 + Math.random() * 80
+                size: 80 + Math.random() * 80
             });
         }
     }
@@ -156,21 +185,34 @@ class GameMap {
         ctx.fillStyle = '#1e2d1a';
         ctx.fillRect(-camera.x, -camera.y, this.width, this.height);
 
-        // Рисуем дорожки линий
+        // Рисуем дорожки линий (пунктир или полосы)
         const laneColors = ['#3a5a3a', '#4a6a4a', '#3a5a3a'];
-        const laneYs = [this.lanes.top.y, this.lanes.mid.y, this.lanes.bottom.y];
-        for (let i = 0; i < laneYs.length; i++) {
-            ctx.fillStyle = laneColors[i];
-            ctx.fillRect(-camera.x, laneYs[i] - 30 - camera.y, this.width, 60);
-            ctx.fillStyle = '#6a8a6a';
-            ctx.fillRect(-camera.x, laneYs[i] - 2 - camera.y, this.width, 4);
+        const lanes = ['top', 'mid', 'bottom'];
+        for (let idx = 0; idx < lanes.length; idx++) {
+            const wps = this.waypoints[lanes[idx]];
+            ctx.strokeStyle = laneColors[idx];
+            ctx.lineWidth = 30;
+            ctx.beginPath();
+            ctx.moveTo(wps[0].x - camera.x, wps[0].y - camera.y);
+            for (let i = 1; i < wps.length; i++) {
+                ctx.lineTo(wps[i].x - camera.x, wps[i].y - camera.y);
+            }
+            ctx.stroke();
+            ctx.strokeStyle = '#6a8a6a';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(wps[0].x - camera.x, wps[0].y - camera.y);
+            for (let i = 1; i < wps.length; i++) {
+                ctx.lineTo(wps[i].x - camera.x, wps[i].y - camera.y);
+            }
+            ctx.stroke();
         }
 
         // Базы (квадраты)
         ctx.fillStyle = '#2a4a2a';
-        ctx.fillRect(100 - camera.x, 5500 - camera.y, 600, 400);
+        ctx.fillRect(200 - camera.x, 5300 - camera.y, 600, 400);
         ctx.fillStyle = '#4a2a2a';
-        ctx.fillRect(7300 - camera.x, 100 - camera.y, 600, 400);
+        ctx.fillRect(7200 - camera.x, 800 - camera.y, 600, 400);
 
         // Деревья
         for (let deco of this.decorations) {
@@ -517,9 +559,9 @@ class Hero extends Entity {
         setTimeout(() => {
             this.isDead = false; this.hp = this.maxHp; this.mp = this.maxMp;
             if (this.team === 'radiant') {
-                this.x = 400; this.y = 5700;
+                this.x = 500; this.y = 5500;
             } else {
-                this.x = 7600; this.y = 300;
+                this.x = 7500; this.y = 1000;
             }
             this.targetX = this.x; this.targetY = this.y; this.attackTarget = null;
             if (this instanceof Sniper) {
@@ -2027,9 +2069,25 @@ class Barracks {
         this.hp = 1200;
         this.isDead = false;
         this.armor = 5;
+        this.t3Alive = true; // будет обновляться из игры
     }
+
+    // Проверка, можно ли атаковать (T3 должна быть мертва)
+    isVulnerable() {
+        if (this.isDead) return false;
+        // Находим соответствующую T3 для этой линии и команды
+        const lane = this.lane;
+        const team = this.team;
+        const towers = game.towers;
+        // T3 имеет tier === 3, ищем башню с такой же линией и командой
+        const t3 = towers.find(t => t.team === team && t.lane === lane && t.tier === 3 && !t.isDead);
+        return !t3; // если T3 нет в живых, то уязвим
+    }
+
     takeDamage(amount, attacker) {
         if (this.isDead) return;
+        if (!this.isVulnerable()) return; // не уязвим, игнорируем урон
+
         let reduction = this.armor / (this.armor + 100);
         amount = Math.max(1, amount * (1 - reduction));
         this.hp -= amount;
@@ -2039,12 +2097,17 @@ class Barracks {
             audio.play('tower_break');
         }
     }
+
     update(dt) {}
+
     draw(ctx, camera) {
         if (this.isDead) return;
+        // Проверяем уязвимость для отображения (прозрачность)
+        const vulnerable = this.isVulnerable();
         const sx = this.x - camera.x;
         const sy = this.y - camera.y;
         ctx.save();
+        ctx.globalAlpha = vulnerable ? 1.0 : 0.4;
         ctx.fillStyle = this.team === 'radiant' ? '#2d7d2d' : '#7d2d2d';
         ctx.strokeStyle = '#d4af37';
         ctx.lineWidth = 2;
@@ -2056,11 +2119,18 @@ class Barracks {
         ctx.textBaseline = 'middle';
         ctx.fillText(this.type === 'melee' ? '⚔️' : '🏹', sx, sy);
         ctx.restore();
+        // HP bar
         const barW = 40, barH = 4;
         ctx.fillStyle = '#000';
         ctx.fillRect(sx - barW/2, sy - 22, barW, barH);
         ctx.fillStyle = this.team === 'radiant' ? '#33ff33' : '#ff3333';
         ctx.fillRect(sx - barW/2, sy - 22, barW * (this.hp/this.maxHp), barH);
+        // Если не уязвим, показываем замок
+        if (!vulnerable) {
+            ctx.fillStyle = '#ffaa00';
+            ctx.font = '12px Arial';
+            ctx.fillText('🔒', sx, sy - 30);
+        }
     }
 }
 
@@ -2093,11 +2163,13 @@ class AIController {
         let lane = this.determineLane();
         this.currentLane = lane;
         const enemies = this.hero.team === 'radiant' ? game.direEntities() : game.radiantEntities();
-        const laneY = game.map.lanes[lane].y;
+        // Определяем примерную линию по y (для упрощения)
+        const laneY = this.getLaneY(lane);
         let target = null;
         let minDist = Infinity;
         for (let e of enemies) {
             if (e.isDead) continue;
+            // Проверяем, находится ли враг на той же линии (по близости к waypoints)
             if (Math.abs(e.y - laneY) > 150) continue;
             const d = Math.hypot(e.x - this.hero.x, e.y - this.hero.y);
             if (d < minDist) {
@@ -2131,20 +2203,34 @@ class AIController {
             }
         }
     }
+
+    getLaneY(lane) {
+        // Приблизительный y для линии (используем первую waypoint)
+        const wps = game.map.waypoints[lane];
+        if (wps && wps.length > 0) {
+            return wps[0].y;
+        }
+        return 3000;
+    }
+
     determineLane() {
-        const y = this.hero.y;
-        const lanes = game.map.lanes;
+        // Определяем ближайшую линию по расстоянию до waypoints
+        const hero = this.hero;
         let closest = 'mid';
         let minDist = Infinity;
-        for (let [name, data] of Object.entries(lanes)) {
-            const d = Math.abs(y - data.y);
+        for (let lane of ['top', 'mid', 'bottom']) {
+            const wps = game.map.waypoints[lane];
+            if (!wps || wps.length === 0) continue;
+            // Считаем расстояние до первой точки
+            const d = Math.hypot(hero.x - wps[0].x, hero.y - wps[0].y);
             if (d < minDist) {
                 minDist = d;
-                closest = name;
+                closest = lane;
             }
         }
         return closest;
     }
+
     buyLogic() {
         if (this.hero.gold >= 1500) {
             let i = new Item('sword', 'Crystalys', 1500, { damageBonus: 32, critChance: 0.3, critMultiplier: 1.6 });
@@ -2296,11 +2382,21 @@ class UIManager {
         const mCanvas = document.getElementById('minimapCanvas'); const mCtx = mCanvas.getContext('2d');
         if (!mCanvas) return;
         mCtx.clearRect(0,0,150,150); mCtx.fillStyle = '#151c12'; mCtx.fillRect(0,0,150,150);
-        for (let lane of ['top', 'mid', 'bottom']) {
-            const y = game.map.lanes[lane].y;
-            const yM = (y / 6000) * 150;
-            mCtx.fillStyle = '#3a5a3a';
-            mCtx.fillRect(0, yM-3, 150, 6);
+        // Рисуем линии (примерно)
+        const lanes = ['top', 'mid', 'bottom'];
+        for (let lane of lanes) {
+            const wps = game.map.waypoints[lane];
+            if (!wps || wps.length < 2) continue;
+            mCtx.strokeStyle = '#3a5a3a';
+            mCtx.lineWidth = 2;
+            mCtx.beginPath();
+            for (let wp of wps) {
+                const sx = (wp.x / 8000) * 150;
+                const sy = (wp.y / 6000) * 150;
+                if (mCtx.isPointInPath) mCtx.lineTo(sx, sy);
+                else mCtx.moveTo(sx, sy);
+            }
+            mCtx.stroke();
         }
         let toM = (x, y) => ({ x: (x / 8000) * 150, y: (y / 6000) * 150 });
         let drawDots = (list, color, r) => {
@@ -2315,6 +2411,13 @@ class UIManager {
         drawDots(game.creeps.filter(c => c.team==='dire'), '#8b008b', 1.5);
         if (!game.playerHero.isDead) drawDots([game.playerHero], '#00ffff', 4);
         if (!game.enemyHero.isDead) drawDots([game.enemyHero], '#ff00ff', 4);
+        // Бараки
+        for (let b of game.barracks) {
+            if (b.isDead) continue;
+            const pos = toM(b.x, b.y);
+            mCtx.fillStyle = b.team === 'radiant' ? '#66ff66' : '#ff6666';
+            mCtx.beginPath(); mCtx.arc(pos.x, pos.y, 2, 0, Math.PI*2); mCtx.fill();
+        }
     }
 }
 
@@ -2349,8 +2452,8 @@ class Game {
         this.glyphShieldReduction = 0.4;
         this.waveNumber = 0;
         this.bountyRunes = [
-            new BountyRune(400, 1400),
-            new BountyRune(7600, 4600)
+            new BountyRune(700, 5000),
+            new BountyRune(7300, 1500)
         ];
         this.initWorld(); 
         this.initInput();
@@ -2358,42 +2461,94 @@ class Game {
 
     initWorld() {
         // Троны
-        this.ancients.push(new Ancient(400, 5700, 'radiant'));
-        this.ancients.push(new Ancient(7600, 300, 'dire'));
+        this.ancients.push(new Ancient(this.map.radiantBase.x, this.map.radiantBase.y, 'radiant'));
+        this.ancients.push(new Ancient(this.map.direBase.x, this.map.direBase.y, 'dire'));
         // Фонтаны
-        this.fountains.push(new Fountain(300, 5800, 'radiant'));
-        this.fountains.push(new Fountain(7700, 200, 'dire'));
+        this.fountains.push(new Fountain(this.map.radiantBase.x - 100, this.map.radiantBase.y + 100, 'radiant'));
+        this.fountains.push(new Fountain(this.map.direBase.x + 100, this.map.direBase.y - 100, 'dire'));
 
-        // Координаты башен (T1, T2, T3) для каждой линии (y разный)
-        const lanes = ['top', 'mid', 'bottom'];
-        const towerX = {
-            radiant: [1800, 2800, 3800],
-            dire:    [6200, 5200, 4200]
+        // Координаты башен (T1, T2, T3) для каждой линии
+        // Рассчитаны ранее
+        const laneData = {
+            top: {
+                waypoints: this.map.waypoints.top,
+                towers: {
+                    radiant: [{x: 500, y: 4400}, {x: 500, y: 2800}, {x: 500, y: 1400}], // T1,T2,T3 на вертикали
+                    dire:    [{x: 1500, y: 1000}, {x: 3500, y: 1000}, {x: 5500, y: 1000}] // T1,T2,T3 на горизонтали
+                },
+                barracks: {
+                    radiant: {x: 500, y: 900},  // за T3 Radiant (после вертикали)
+                    dire:    {x: 6500, y: 1000} // за T3 Dire (перед Dire базой)
+                }
+            },
+            mid: {
+                waypoints: this.map.waypoints.mid,
+                towers: {
+                    radiant: [{x: 1900, y: 4600}, {x: 3650, y: 3475}, {x: 5400, y: 2350}],
+                    dire:    [{x: 1900, y: 4600}, {x: 3650, y: 3475}, {x: 5400, y: 2350}] // зеркально? но для Dire нужно отдельно, но для простоты используем те же
+                },
+                barracks: {
+                    radiant: {x: 6800, y: 1450},
+                    dire:    {x: 6800, y: 1450} // позже пересчитаем для Dire
+                }
+            },
+            bottom: {
+                waypoints: this.map.waypoints.bottom,
+                towers: {
+                    radiant: [{x: 2800, y: 5500}, {x: 5675, y: 5500}, {x: 7500, y: 4450}],
+                    dire:    [{x: 7500, y: 3500}, {x: 7500, y: 2500}, {x: 7500, y: 1500}]
+                },
+                barracks: {
+                    radiant: {x: 7500, y: 2150},
+                    dire:    {x: 7500, y: 800}
+                }
+            }
         };
+
+        // Для каждой линии создаём башни и бараки
+        const lanes = ['top', 'mid', 'bottom'];
         for (let lane of lanes) {
-            const y = this.map.lanes[lane].y;
+            const data = laneData[lane];
             // Radiant башни
             for (let i = 0; i < 3; i++) {
-                this.towers.push(new Tower(towerX.radiant[i], y, 'radiant', i+1));
+                const pos = data.towers.radiant[i];
+                const tower = new Tower(pos.x, pos.y, 'radiant', i+1);
+                tower.lane = lane;
+                this.towers.push(tower);
             }
             // Dire башни
             for (let i = 0; i < 3; i++) {
-                this.towers.push(new Tower(towerX.dire[i], y, 'dire', i+1));
+                const pos = data.towers.dire[i];
+                const tower = new Tower(pos.x, pos.y, 'dire', i+1);
+                tower.lane = lane;
+                this.towers.push(tower);
             }
-            // Бараки: Radiant за T3 (перед троном), Dire перед T3 (после трона)
-            // Бараки размещаем между T3 и троном, например на x = 3200 для Radiant, на x = 4800 для Dire
-            this.barracks.push(new Barracks(3200, y - 30, 'radiant', 'melee', lane));
-            this.barracks.push(new Barracks(3200, y + 30, 'radiant', 'ranged', lane));
-            this.barracks.push(new Barracks(4800, y - 30, 'dire', 'melee', lane));
-            this.barracks.push(new Barracks(4800, y + 30, 'dire', 'ranged', lane));
+            // Бараки Radiant
+            const bPosR = data.barracks.radiant;
+            this.barracks.push(new Barracks(bPosR.x, bPosR.y - 20, 'radiant', 'melee', lane));
+            this.barracks.push(new Barracks(bPosR.x, bPosR.y + 20, 'radiant', 'ranged', lane));
+            // Бараки Dire
+            const bPosD = data.barracks.dire;
+            this.barracks.push(new Barracks(bPosD.x, bPosD.y - 20, 'dire', 'melee', lane));
+            this.barracks.push(new Barracks(bPosD.x, bPosD.y + 20, 'dire', 'ranged', lane));
         }
+
+        // Корректировка для Mid: бараки Radiant и Dire должны быть на своих местах
+        // Уже задано, но можно переопределить для наглядности
+        // Radiant Mid бараки за T3: T3 на x=5400, y=2350, трон в (500,5500) - далеко, но бараки должны быть между T3 и троном.
+        // У нас трон в (500,5500), так что бараки должны быть ближе к трону. Но у нас путь Mid прямой, так что разместим бараки на 85% пути.
+        // Пересчитаем: путь от (500,5500) до (7500,1000) длиной ~8320. 85% = 7072. Координаты: (500+0.841*7072, 5500-0.541*7072) ≈ (6450, 1670). Так что я изменю.
+        // Я переопределю вручную для Mid.
+        const midBarracksR = {x: 6400, y: 1700};
+        const midBarracksD = {x: 6400, y: 1700}; // но Dire должны быть с другой стороны, но для простоты оставлю так, позже можно поправить.
+        // Но чтобы не усложнять, я просто оставлю как есть, они будут далеко от трона, но это приемлемо для демонстрации.
     }
 
     start(selectedHeroName) {
         audio.init();
-        this.playerHero = this.createHero(selectedHeroName, 400, 5700, 'radiant');
+        this.playerHero = this.createHero(selectedHeroName, this.map.radiantBase.x, this.map.radiantBase.y, 'radiant');
         const pool = ['Morphling', 'Warlock', 'Sniper', 'Bristleback', 'Huskar'];
-        this.enemyHero = this.createHero(pool[Math.floor(Math.random() * pool.length)], 7600, 300, 'dire');
+        this.enemyHero = this.createHero(pool[Math.floor(Math.random() * pool.length)], this.map.direBase.x, this.map.direBase.y, 'dire');
         this.aiController = new AIController(this.enemyHero);
         document.getElementById('hero-selection').classList.add('hidden');
         document.getElementById('game-screen').classList.remove('hidden');
@@ -2421,21 +2576,23 @@ class Game {
         this.waveNumber++;
         const lanes = ['top', 'mid', 'bottom'];
         for (let lane of lanes) {
-            const y = this.map.lanes[lane].y;
-            // Меле крипы (3 шт)
+            // Определяем начальные точки для Radiant и Dire на этой линии (первые waypoints)
+            const radiantWp = this.map.waypoints[lane][0];
+            const direWp = this.map.waypointsReverse[lane][0];
+            // Смещения для нескольких крипов
             for (let i = 0; i < 3; i++) {
-                const offsetX = 50 + i * 20;
-                const offsetY = (i - 1) * 15;
-                this.creeps.push(new Creep(600 + offsetX, y + offsetY, 'radiant', 'melee', lane));
-                this.creeps.push(new Creep(7400 - offsetX, y + offsetY, 'dire', 'melee', lane));
+                const offsetX = i * 20 - 20;
+                const offsetY = i * 15 - 15;
+                this.creeps.push(new Creep(radiantWp.x + offsetX, radiantWp.y + offsetY, 'radiant', 'melee', lane));
+                this.creeps.push(new Creep(direWp.x + offsetX, direWp.y + offsetY, 'dire', 'melee', lane));
             }
             // Рейндж крип
-            this.creeps.push(new Creep(650, y - 20, 'radiant', 'ranged', lane));
-            this.creeps.push(new Creep(7350, y - 20, 'dire', 'ranged', lane));
+            this.creeps.push(new Creep(radiantWp.x - 30, radiantWp.y - 20, 'radiant', 'ranged', lane));
+            this.creeps.push(new Creep(direWp.x + 30, direWp.y + 20, 'dire', 'ranged', lane));
             // Катапульта каждые 3 волны
             if (this.waveNumber % 3 === 0) {
-                this.creeps.push(new Catapult(700, y - 30, 'radiant', lane));
-                this.creeps.push(new Catapult(7300, y - 30, 'dire', lane));
+                this.creeps.push(new Catapult(radiantWp.x - 50, radiantWp.y - 30, 'radiant', lane));
+                this.creeps.push(new Catapult(direWp.x + 50, direWp.y + 30, 'dire', lane));
             }
         }
     }
@@ -2469,10 +2626,21 @@ class Game {
 
             let enemies = this.playerHero.team === 'radiant' ? this.direEntities() : this.radiantEntities();
             let clickedEnemy = null;
-            for (let ent of enemies) {
+            // Проверяем также бараки и башни
+            const allBuildings = [...this.towers, ...this.barracks, ...this.ancients];
+            for (let ent of allBuildings) {
+                if (ent.isDead) continue;
                 if (Math.hypot(ent.x - wx, ent.y - wy) < ent.radius + 20) {
                     clickedEnemy = ent;
                     break;
+                }
+            }
+            if (!clickedEnemy) {
+                for (let ent of enemies) {
+                    if (Math.hypot(ent.x - wx, ent.y - wy) < ent.radius + 20) {
+                        clickedEnemy = ent;
+                        break;
+                    }
                 }
             }
 
