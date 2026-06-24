@@ -363,6 +363,17 @@ class Entity {
         // Запрет атаки своих
         if (attacker && attacker.team === this.team) return;
 
+        // Башенный агро: если герой атакует героя под башней
+        if (attacker instanceof Hero && this instanceof Hero && attacker.team !== this.team) {
+            const towers = game.towers.filter(t => t.team === this.team && !t.isDead);
+            for (let t of towers) {
+                const dist = Math.hypot(t.x - attacker.x, t.y - attacker.y);
+                if (dist <= t.attackRange) {
+                    t.addAggro(attacker);
+                }
+            }
+        }
+
         if (damageType !== 'magic' && this.inventory) {
             let vanguard = this.inventory.items.find(i => i.id === 'vanguard');
             if (vanguard) {
@@ -1923,6 +1934,7 @@ class Catapult extends Entity {
     }
 }
 
+// --- ИЗМЕНЕННЫЙ КЛАСС TOWER (исправлена логика агро) ---
 class Tower extends Entity {
     constructor(x, y, team, tier) {
         super(x, y, team, 32, 4500, 85, 0);
@@ -1932,6 +1944,15 @@ class Tower extends Entity {
         this.glyphTimer = 0;
         this.tier = tier;
         this.lane = ''; // будет установлено извне
+        // Список героев, которые заагрили башню (атаковали союзного героя)
+        this.aggroSet = new Set();
+    }
+
+    // Добавить героя в список агро
+    addAggro(hero) {
+        if (hero && hero.team !== this.team && !hero.isDead) {
+            this.aggroSet.add(hero);
+        }
     }
 
     isAttackable() {
@@ -1949,21 +1970,76 @@ class Tower extends Entity {
             }
         }
         if (this.attackCooldown > 0) this.attackCooldown -= dt;
-        let enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
-        this.attackTarget = null;
-        for (let e of enemies) {
-            if (Math.hypot(e.x - this.x, e.y - this.y) <= this.attackRange) { this.attackTarget = e; break; }
+
+        // Собираем всех врагов в радиусе
+        const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+        const inRange = enemies.filter(e => {
+            if (e.isDead || !e.isAttackable()) return false;
+            const dist = Math.hypot(e.x - this.x, e.y - this.y);
+            return dist <= this.attackRange;
+        });
+
+        // 1. Поиск агрессивного героя (кто атаковал союзного героя)
+        let aggroTarget = null;
+        for (let h of this.aggroSet) {
+            if (h.isDead || h.team === this.team) continue;
+            const dist = Math.hypot(h.x - this.x, h.y - this.y);
+            if (dist <= this.attackRange) {
+                aggroTarget = h;
+                break;
+            }
         }
+
+        // Если есть агрессивный герой в радиусе, атакуем его
+        if (aggroTarget) {
+            this.attackTarget = aggroTarget;
+        } else {
+            // 2. Ищем крипов (приоритет перед обычными героями)
+            let creepTarget = null;
+            for (let e of inRange) {
+                if (e instanceof Creep) {
+                    creepTarget = e;
+                    break;
+                }
+            }
+            if (creepTarget) {
+                this.attackTarget = creepTarget;
+            } else {
+                // 3. Любой другой враг (герой или строение)
+                this.attackTarget = inRange.length > 0 ? inRange[0] : null;
+            }
+        }
+
+        // Если цель есть и кулдаун атаки готов, атакуем
         if (this.attackTarget && this.attackCooldown <= 0) {
             this.attackCooldown = this.attackSpeed;
             game.projectiles.push(new Projectile(this.x, this.y - 40, this.attackTarget, this.damage, this.team, this));
         }
+
+        // Очистка aggroSet от мёртвых или вышедших из радиуса (делается при следующем апдейте)
+        // Можно также удалять через некоторое время, но достаточно проверки при выборе цели
+        // Однако если герой вышел из радиуса, но всё ещё в aggroSet, он не будет выбран, т.к. проверка на дистанцию.
+        // Но чтобы Set не разрастался, периодически чистим
+        if (Math.random() < 0.01) { // раз в ~100 кадров
+            const toRemove = [];
+            for (let h of this.aggroSet) {
+                if (h.isDead || h.team === this.team || Math.hypot(h.x - this.x, h.y - this.y) > this.attackRange * 1.5) {
+                    toRemove.push(h);
+                }
+            }
+            for (let h of toRemove) {
+                this.aggroSet.delete(h);
+            }
+        }
     }
+
     takeDamage(amount, attacker, isFb = false, damageType = 'physical') {
         if (this.isDead || this.glyphActive) return;
         super.takeDamage(amount, attacker, isFb, damageType);
     }
+
     onDeath(attacker) { audio.play('tower_break'); }
+
     draw(ctx, camera) {
         if (this.isDead) return; this.drawShadow(ctx, camera);
         let sx = this.x - camera.x; let sy = this.y - camera.y;
