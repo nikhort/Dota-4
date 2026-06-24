@@ -65,65 +65,76 @@ resizeCanvas();
 window.addEventListener('contextmenu', e => e.preventDefault());
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 
+// ----------------------------------------------
+// КАРТА С ТРЁМЯ ЛИНИЯМИ (Dota 2 стиль)
+// ----------------------------------------------
 class GameMap {
     constructor() {
-        this.width = 3200;
-        this.height = Math.max(900, window.innerHeight);
-        this.laneY = this.height / 2;
+        this.width = 8000;
+        this.height = 6000;
+        // Координаты линий
+        this.lanes = {
+            top:    { y: 1200, label: 'top' },
+            mid:    { y: 3000, label: 'mid' },
+            bottom: { y: 4800, label: 'bottom' }
+        };
+        // Waypoints для каждой линии (от Radiant к Dire)
+        // Radiant база в левом нижнем углу (400, 5700), Dire база в правом верхнем (7600, 300)
+        this.waypoints = {
+            top:    [{ x: 600, y: 1200 }, { x: 7400, y: 1200 }],
+            mid:    [{ x: 600, y: 3000 }, { x: 7400, y: 3000 }],
+            bottom: [{ x: 600, y: 4800 }, { x: 7400, y: 4800 }]
+        };
+        // Обратные маршруты для Dire
+        this.waypointsReverse = {
+            top:    [{ x: 7400, y: 1200 }, { x: 600, y: 1200 }],
+            mid:    [{ x: 7400, y: 3000 }, { x: 600, y: 3000 }],
+            bottom: [{ x: 7400, y: 4800 }, { x: 600, y: 4800 }]
+        };
 
         this.treeImg = new Image();
         this.treeImg.src = 'images/tree.png';
-
         this.decorations = [];
         this.generateDecorations();
     }
+
     generateDecorations() {
-        const margin = 120;
-        const topCount = 8;
-        const bottomCount = 7;
-        const minDistance = 180;
-
-        const hasOverlap = (x, y) => {
-            return this.decorations.some(deco => {
-                const dx = deco.x - x;
-                const dy = deco.y - y;
-                return Math.hypot(dx, dy) < minDistance;
-            });
-        };
-
-        const placeTree = (xRange, yRange, sizeRange) => {
-            for (let attempt = 0; attempt < 60; attempt++) {
-                const x = xRange();
-                const y = yRange();
-                if (!hasOverlap(x, y)) {
-                    const size = sizeRange();
-                    this.decorations.push({ x, y, type: 'tree', size });
-                    return true;
+        // Добавим деревья вдоль линий
+        for (let lane of ['top', 'mid', 'bottom']) {
+            const y = this.lanes[lane].y;
+            for (let x = 800; x < 7200; x += 300) {
+                if (Math.random() < 0.25) {
+                    const offsetY = (Math.random() - 0.5) * 80;
+                    this.decorations.push({
+                        x: x + (Math.random() - 0.5) * 100,
+                        y: y + offsetY + (Math.random() > 0.5 ? 130 : -130),
+                        type: 'tree',
+                        size: 80 + Math.random() * 60
+                    });
                 }
             }
-            return false;
-        };
-
-        for (let i = 0; i < topCount; i++) {
-            placeTree(
-                () => margin + Math.random() * (this.width - margin * 2),
-                () => margin + Math.random() * (this.laneY - margin * 2 - 160),
-                () => 150 + Math.random() * 40
-            );
         }
-
-        for (let i = 0; i < bottomCount; i++) {
-            placeTree(
-                () => margin + Math.random() * (this.width - margin * 2),
-                () => this.laneY + 160 + Math.random() * (this.height - this.laneY - margin * 2 - 120),
-                () => 130 + Math.random() * 50
-            );
+        // Добавим деревья в базах
+        for (let i = 0; i < 30; i++) {
+            this.decorations.push({
+                x: 200 + Math.random() * 400,
+                y: 5400 + Math.random() * 400,
+                type: 'tree',
+                size: 100 + Math.random() * 80
+            });
+            this.decorations.push({
+                x: 7400 + Math.random() * 400,
+                y: 200 + Math.random() * 400,
+                type: 'tree',
+                size: 100 + Math.random() * 80
+            });
         }
     }
+
     drawDecoration(ctx, deco, camera) {
         const img = this.treeImg;
         const size = deco.size || 160;
-        const sx = deco.x - camera.x - size / 2;
+        const sx = deco.x - camera.x - size/2;
         const sy = deco.y - camera.y - size;
 
         if (img && img.complete && img.naturalWidth) {
@@ -132,37 +143,65 @@ class GameMap {
             ctx.save();
             ctx.fillStyle = '#2b6b2f';
             ctx.beginPath();
-            ctx.ellipse(deco.x - camera.x, deco.y - camera.y - size * 0.2, size * 0.5, size * 0.75, 0, 0, Math.PI * 2);
+            ctx.ellipse(deco.x - camera.x, deco.y - camera.y - size*0.2, size*0.5, size*0.75, 0, 0, Math.PI*2);
             ctx.fill();
             ctx.fillStyle = '#6d3f1e';
-            ctx.fillRect(deco.x - camera.x - size * 0.05, deco.y - camera.y - size * 0.16, size * 0.1, size * 0.25);
+            ctx.fillRect(deco.x - camera.x - size*0.05, deco.y - camera.y - size*0.16, size*0.1, size*0.25);
             ctx.restore();
         }
     }
+
     draw(ctx, camera) {
+        // Фон
         ctx.fillStyle = '#1e2d1a';
         ctx.fillRect(-camera.x, -camera.y, this.width, this.height);
-        ctx.fillStyle = '#2d241d';
-        ctx.fillRect(-camera.x, this.laneY - 80 - camera.y, this.width, 160);
 
+        // Рисуем дорожки линий
+        const laneColors = ['#3a5a3a', '#4a6a4a', '#3a5a3a'];
+        const laneYs = [this.lanes.top.y, this.lanes.mid.y, this.lanes.bottom.y];
+        for (let i = 0; i < laneYs.length; i++) {
+            ctx.fillStyle = laneColors[i];
+            ctx.fillRect(-camera.x, laneYs[i] - 30 - camera.y, this.width, 60);
+            ctx.fillStyle = '#6a8a6a';
+            ctx.fillRect(-camera.x, laneYs[i] - 2 - camera.y, this.width, 4);
+        }
+
+        // Базы (квадраты)
+        ctx.fillStyle = '#2a4a2a';
+        ctx.fillRect(100 - camera.x, 5500 - camera.y, 600, 400);
+        ctx.fillStyle = '#4a2a2a';
+        ctx.fillRect(7300 - camera.x, 100 - camera.y, 600, 400);
+
+        // Деревья
         for (let deco of this.decorations) {
             this.drawDecoration(ctx, deco, camera);
         }
+
+        // Границы карты
+        ctx.strokeStyle = '#2d4a2d';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(-camera.x, -camera.y, this.width, this.height);
     }
 }
 
+// ----------------------------------------------
+// КАМЕРА
+// ----------------------------------------------
 class Camera {
     constructor(map) { this.x = 0; this.y = 0; this.map = map; }
     update(tx, ty) {
         this.x = tx - canvas.width / 2;
         this.y = ty - canvas.height / 2;
-        if (this.x < 0) this.x = 0; if (this.y < 0) this.y = 0;
+        if (this.x < 0) this.x = 0;
+        if (this.y < 0) this.y = 0;
         if (this.x > this.map.width - canvas.width) this.x = this.map.width - canvas.width;
         if (this.y > this.map.height - canvas.height) this.y = this.map.height - canvas.height;
     }
 }
 
-// --- СПОСОБНОСТИ И ИНВЕНТАРЬ ---
+// ----------------------------------------------
+// СПОСОБНОСТИ И ИНВЕНТАРЬ
+// ----------------------------------------------
 class Ability {
     constructor(name, type, cooldown, cost, desc = "") {
         this.name = name; this.type = type; this.maxCooldown = cooldown;
@@ -244,7 +283,9 @@ class Inventory {
     }
 }
 
-// --- БАЗОВЫЕ ИГРОВЫЕ ОБЪЕКТЫ ---
+// ----------------------------------------------
+// БАЗОВЫЙ КЛАСС СУЩНОСТИ
+// ----------------------------------------------
 class Entity {
     constructor(x, y, team, radius, hp, damage, speed) {
         this.x = x; this.y = y; this.team = team; this.radius = radius;
@@ -260,7 +301,12 @@ class Entity {
         this.burningSpears = [];
         this.nasalGooEffects = [];
         this.quillStacks = [];
+        // Для движения по маршруту
+        this.waypoints = null;
+        this.currentWaypointIndex = 0;
+        this.isMovingToWaypoint = false;
     }
+
     takeDamage(amount, attacker, isFb = false, damageType = 'physical') {
         if (this.isDead) return;
 
@@ -293,6 +339,7 @@ class Entity {
         game.uiManager.addFloatingText(this.x, this.y - 20, Math.floor(amount), damageType === 'magic' ? '#cc00ff' : '#ff4400');
         if (this.hp <= 0) { this.hp = 0; this.isDead = true; this.onDeath(attacker); }
     }
+
     updateBuffs(dt) {
         if (this.silenceTimer > 0) this.silenceTimer -= dt;
         if (this.lifeBreakSlowTimer > 0) this.lifeBreakSlowTimer -= dt;
@@ -310,10 +357,21 @@ class Entity {
             }
         }
     }
+
     onDeath(attacker) {}
-    moveTo(x, y) { this.targetX = x; this.targetY = y; }
+    moveTo(x, y) { this.targetX = x; this.targetY = y; this.isMovingToWaypoint = false; }
     setMoveTarget(x, y) { this.moveTo(x, y); }
-    
+
+    setWaypoints(waypoints) {
+        this.waypoints = waypoints;
+        this.currentWaypointIndex = 0;
+        this.isMovingToWaypoint = true;
+        if (waypoints && waypoints.length > 0) {
+            this.targetX = waypoints[0].x;
+            this.targetY = waypoints[0].y;
+        }
+    }
+
     updateMovement(dt) {
         if (this.headshotSlowTimer > 0) this.headshotSlowTimer -= dt;
         if (this.hitEffectTimer > 0) this.hitEffectTimer -= dt;
@@ -328,7 +386,7 @@ class Entity {
                 }
                 return false;
             });
-            this.slowTimer = this.slowTimer; // keep existing slow behavior separate
+            this.slowTimer = this.slowTimer;
             this._nasalGooSlow = Math.min(0.65, totalSlow);
         } else {
             this._nasalGooSlow = 0;
@@ -364,21 +422,36 @@ class Entity {
         let globalSpeed = window.game ? game.globalSpeedMultiplier : 0.8;
         this.speed = this.baseSpeed * currentSlow * globalSpeed;
 
-        if (this.attackTarget) { this.targetX = this.attackTarget.x; this.targetY = this.attackTarget.y; }
+        if (this.attackTarget && !this.attackTarget.isDead) {
+            this.targetX = this.attackTarget.x;
+            this.targetY = this.attackTarget.y;
+        } else if (this.isMovingToWaypoint && this.waypoints && this.waypoints.length > 0) {
+            const wp = this.waypoints[this.currentWaypointIndex];
+            if (Math.hypot(this.x - wp.x, this.y - wp.y) < 20) {
+                this.currentWaypointIndex++;
+                if (this.currentWaypointIndex >= this.waypoints.length) {
+                    this.isMovingToWaypoint = false;
+                } else {
+                    this.targetX = this.waypoints[this.currentWaypointIndex].x;
+                    this.targetY = this.waypoints[this.currentWaypointIndex].y;
+                }
+            }
+        }
 
         let dx = this.targetX - this.x;
         let dy = this.targetY - this.y;
         let dist = Math.hypot(dx, dy);
-        
+
         let stopRange = this.attackTarget ? this.attackRange * 0.85 : 2;
 
         if (dist > stopRange) {
             this.facing = dx >= 0 ? 1 : -1;
             let step = this.speed * dt;
-            
+
             if (step >= (dist - stopRange)) {
                 if (!this.attackTarget) {
-                    this.x = this.targetX; this.y = this.targetY;
+                    this.x = this.targetX;
+                    this.y = this.targetY;
                 } else {
                     this.x += (dx / dist) * (dist - stopRange);
                     this.y += (dy / dist) * (dist - stopRange);
@@ -388,9 +461,10 @@ class Entity {
                 this.y += (dy / dist) * step;
             }
         } else if (!this.attackTarget) {
-            this.targetX = this.x; this.targetY = this.y;
+            // Остановились у цели или достигли waypoint
         }
     }
+
     drawHealthBar(ctx, camera) {
         let sx = this.x - camera.x; let sy = this.y - camera.y - this.radius - 10;
         let w = this.radius * 2.4; let h = 5;
@@ -398,6 +472,7 @@ class Entity {
         ctx.fillStyle = this.team === 'radiant' ? '#33ff33' : '#ff3333';
         ctx.fillRect(sx - w/2, sy, (this.hp / this.maxHp) * w, h);
     }
+
     drawShadow(ctx, camera) {
         let sx = this.x - camera.x; let sy = this.y - camera.y + this.radius - 2;
         ctx.save(); ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath();
@@ -406,7 +481,9 @@ class Entity {
     }
 }
 
-// --- КЛАССЫ ГЕРОЕВ ---
+// ----------------------------------------------
+// ГЕРОИ
+// ----------------------------------------------
 class Hero extends Entity {
     constructor(x, y, team, name) {
         super(x, y, team, 22, 600, 54, 275);
@@ -439,7 +516,11 @@ class Hero extends Entity {
 
         setTimeout(() => {
             this.isDead = false; this.hp = this.maxHp; this.mp = this.maxMp;
-                this.x = this.team === 'radiant' ? 160 : 3040; this.y = game.map.laneY;
+            if (this.team === 'radiant') {
+                this.x = 400; this.y = 5700;
+            } else {
+                this.x = 7600; this.y = 300;
+            }
             this.targetX = this.x; this.targetY = this.y; this.attackTarget = null;
             if (this instanceof Sniper) {
                 this.shrapnelCharges = 2;
@@ -619,7 +700,7 @@ class Morphling extends Hero {
     update(dt) {
         if (this.waveformTimer > 0) {
             this.waveformTimer -= dt; this.x += this.wdx * dt; this.y += this.wdy * dt;
-            this.x = Math.max(0, Math.min(3200, this.x)); this.y = Math.max(0, Math.min(900, this.y));
+            this.x = Math.max(0, Math.min(8000, this.x)); this.y = Math.max(0, Math.min(6000, this.y));
             let enemies = this.team === 'radiant' ? game.direEntities() : game.direEntities();
             for (let e of enemies) {
                 if (!this.wHits.includes(e) && Math.hypot(e.x - this.x, e.y - this.y) < 65) {
@@ -722,8 +803,8 @@ class AdaptiveStrikeProjectile {
             let pushDist = 80;
             this.target.x += Math.cos(pushAng) * pushDist;
             this.target.y += Math.sin(pushAng) * pushDist;
-            this.target.x = Math.max(0, Math.min(3200, this.target.x));
-            this.target.y = Math.max(0, Math.min(900, this.target.y));
+            this.target.x = Math.max(0, Math.min(8000, this.target.x));
+            this.target.y = Math.max(0, Math.min(6000, this.target.y));
             this.target.targetX = this.target.x; this.target.targetY = this.target.y;
         } else {
             this.x += (dx / dist) * this.speed * dt;
@@ -1413,6 +1494,9 @@ class Huskar extends Hero {
     }
 }
 
+// ----------------------------------------------
+// ВСПОМОГАТЕЛЬНЫЕ КЛАССЫ
+// ----------------------------------------------
 class ShrapnelZone {
     constructor(x, y, team, caster) {
         this.x = x; this.y = y; this.team = team; this.caster = caster;
@@ -1455,14 +1539,22 @@ class ShrapnelZone {
     }
 }
 
-// --- КЛАССЫ КРИПОВ ---
+// Крип с поддержкой линии и waypoints
 class Creep extends Entity {
-    constructor(x, y, team, type) {
+    constructor(x, y, team, type, lane) {
         let hp = type === 'melee' ? 320 : 230;
         let dmg = type === 'melee' ? 19 : 22;
         let rng = type === 'melee' ? 45 : 280;
-        super(x, y, team, 11, hp, dmg, 195); this.type = type; this.attackRange = rng; this.attackSpeed = 1.1;
+        super(x, y, team, 11, hp, dmg, 195);
+        this.type = type;
+        this.attackRange = rng;
+        this.attackSpeed = 1.1;
+        this.lane = lane;
+        const map = game.map;
+        const waypoints = (this.team === 'radiant') ? map.waypoints[lane] : map.waypointsReverse[lane];
+        this.setWaypoints(waypoints);
     }
+
     takeDamage(amount, attacker, isFb = false, damageType = 'physical') {
         if (this.isDead) return;
 
@@ -1477,12 +1569,14 @@ class Creep extends Entity {
             this.attackTarget = actualAttacker;
         }
     }
+
     isClicked(mouseX, mouseY) {
         const clickHitboxRadius = this.radius + 15;
         const dx = mouseX - this.x;
         const dy = mouseY - this.y;
         return Math.hypot(dx, dy) <= clickHitboxRadius;
     }
+
     update(dt) {
         if (this.isDead) return;
         this.updateBuffs(dt);
@@ -1492,81 +1586,47 @@ class Creep extends Entity {
         if (this.lifeBreakSlowTimer > 0) rate *= 0.4;
         if (this.attackCooldown > 0) this.attackCooldown -= dt * rate;
 
-        if (!this.attackTarget || this.attackTarget.hp <= 0 || this.attackTarget.team === this.team) {
+        if (!this.attackTarget || this.attackTarget.isDead || this.attackTarget.team === this.team) {
             let closest = null;
             let minDist = Infinity;
-
-            for (let creep of game.creeps) {
-                if (!creep || creep.isDead || creep.team === this.team) continue;
-                let dist = Math.hypot(creep.x - this.x, creep.y - this.y);
-
-                if (dist < minDist) {
-                    minDist = dist;
-                    closest = creep;
+            const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+            for (let e of enemies) {
+                if (e.isDead || e === this) continue;
+                const d = Math.hypot(e.x - this.x, e.y - this.y);
+                if (d < minDist) {
+                    minDist = d;
+                    closest = e;
                 }
             }
-
-            if (!closest) {
-                const heroes = [game.playerHero, game.enemyHero];
-
-                for (let hero of heroes) {
-                    if (!hero || hero.isDead || hero.team === this.team) continue;
-                    let dist = Math.hypot(hero.x - this.x, hero.y - this.y);
-
-                    if (dist <= 100) {
-                        minDist = dist;
-                        closest = hero;
-                    }
-                }
+            if (closest && minDist <= this.attackRange + 50) {
+                this.attackTarget = closest;
+            } else {
+                this.attackTarget = null;
             }
-
-            if (!closest) {
-                for (let tower of game.towers) {
-                    if (!tower || tower.isDead || tower.team === this.team) continue;
-                    let dist = Math.hypot(tower.x - this.x, tower.y - this.y);
-
-                    if (dist < minDist) {
-                        minDist = dist;
-                        closest = tower;
-                    }
-                }
-            }
-
-            if (!closest) {
-                for (let ancient of game.ancients) {
-                    if (!ancient || ancient.isDead || ancient.team === this.team) continue;
-                    closest = ancient;
-                    break;
-                }
-            }
-
-            this.attackTarget = closest;
         }
 
-        if (!this.attackTarget) {
-            this.targetX = this.team === 'radiant' ? 3200 : 0;
-            this.targetY = game.map.laneY;
-        }
-
-        this.updateMovement(dt);
-        if (this.attackTarget) {
+        if (this.attackTarget && !this.attackTarget.isDead) {
             let d = Math.hypot(this.attackTarget.x - this.x, this.attackTarget.y - this.y);
             if (d <= this.attackRange && this.attackCooldown <= 0) {
                 this.attackCooldown = this.attackSpeed;
                 let finalDamage = this.damage;
                 if (this.vladmirAura) finalDamage *= 1.18;
-                if (this.type === 'melee') { 
+                if (this.type === 'melee') {
                     this.attackTarget.takeDamage(finalDamage, this);
                     if (this.vladmirAura) {
                         let lifesteal = finalDamage * 0.20;
                         if (this.attackTarget instanceof Creep) lifesteal *= 0.6;
                         this.hp = Math.min(this.maxHp, this.hp + lifesteal);
                     }
+                } else {
+                    game.projectiles.push(new Projectile(this.x, this.y, this.attackTarget, finalDamage, this.team, this));
                 }
-                else { game.projectiles.push(new Projectile(this.x, this.y, this.attackTarget, finalDamage, this.team, this)); }
             }
         }
+
+        this.updateMovement(dt);
     }
+
     onDeath(attacker) {
         audio.play('creep_death');
         if (!attacker) return;
@@ -1577,6 +1637,7 @@ class Creep extends Entity {
         let heroes = [game.playerHero, game.enemyHero].filter(h => h && !h.isDead);
         for (let h of heroes) { if (Math.hypot(h.x - this.x, h.y - this.y) < 600) h.addXp(40); }
     }
+
     draw(ctx, camera) {
         this.drawShadow(ctx, camera);
         let sx = this.x - camera.x; let sy = this.y - camera.y;
@@ -1595,7 +1656,7 @@ class Creep extends Entity {
 
 class WarlockGolem extends Creep {
     constructor(x, y, team) {
-        super(x, y, team, 'melee');
+        super(x, y, team, 'melee', 'mid');
         this.radius = 25;
         this.maxHp = 1200;
         this.hp = 1200;
@@ -1604,6 +1665,8 @@ class WarlockGolem extends Creep {
         this.speed = 200;
         this.attackRange = 90;
         this.lifeTime = 20.0;
+        this.waypoints = null;
+        this.isMovingToWaypoint = false;
     }
     update(dt) {
         if (this.isDead) return;
@@ -1632,14 +1695,17 @@ class WarlockGolem extends Creep {
     }
 }
 
-// --- СТРУКТУРЫ И СНАРЯДЫ ---
 class Catapult extends Entity {
-    constructor(x, y, team) {
+    constructor(x, y, team, lane) {
         super(x, y, team, 24, 700, 90, 70);
         this.attackRange = 350;
         this.attackCooldown = 0;
         this.attackSpeed = 2.5; 
         this.bounty = 80;
+        this.lane = lane;
+        const map = game.map;
+        const waypoints = (this.team === 'radiant') ? map.waypoints[lane] : map.waypointsReverse[lane];
+        this.setWaypoints(waypoints);
     }
 
     update(dt) {
@@ -1654,62 +1720,39 @@ class Catapult extends Entity {
         if (!this.attackTarget || this.attackTarget.hp <= 0 || this.attackTarget.team === this.team) {
             let closest = null;
             let minDist = Infinity;
-
-            let potentialTargets = [];
-            if (game.creeps) potentialTargets = potentialTargets.concat(game.creeps);
-            if (game.towers) potentialTargets = potentialTargets.concat(game.towers);
-            if (game.ancients) potentialTargets = potentialTargets.concat(game.ancients);
-            if (game.playerHero) potentialTargets.push(game.playerHero);
-            if (game.enemyHero) potentialTargets.push(game.enemyHero);
-
-            for (let entity of potentialTargets) {
-                if (!entity || entity.hp <= 0) continue;
-                if (entity.team !== this.team) {
-                    let dist = Math.hypot(entity.x - this.x, entity.y - this.y);
-                    if (dist < minDist) {
-                        minDist = dist;
-                        closest = entity;
-                    }
+            const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+            for (let e of enemies) {
+                if (e.isDead) continue;
+                const d = Math.hypot(e.x - this.x, e.y - this.y);
+                if (d < minDist) {
+                    minDist = d;
+                    closest = e;
                 }
             }
-            this.attackTarget = closest;
+            if (closest && minDist <= this.attackRange + 50) {
+                this.attackTarget = closest;
+            } else {
+                this.attackTarget = null;
+            }
         }
 
-        if (!this.attackTarget) {
-            this.targetX = this.team === 'radiant' ? 4000 : 0;
-            this.targetY = game.map.laneY;
-        }
-
-        this.updateMovement(dt);
-        if (this.attackTarget) {
+        if (this.attackTarget && !this.attackTarget.isDead) {
             let d = Math.hypot(this.attackTarget.x - this.x, this.attackTarget.y - this.y);
             if (d <= this.attackRange && this.attackCooldown <= 0) {
                 this.performAttack();
             }
         }
+
+        this.updateMovement(dt);
     }
 
     performAttack() {
-        if (!this.attackTarget || this.attackTarget.isDead) {
-            return;
-        }
-
+        if (!this.attackTarget || this.attackTarget.isDead) return;
         let damage = this.damage;
-
         if (this.attackTarget instanceof Tower || this.attackTarget instanceof Ancient) {
             damage *= 2;
         }
-
-        game.projectiles.push(
-            new Projectile(
-                this.x,
-                this.y,
-                this.attackTarget,
-                damage,
-                this.team,
-                this
-            )
-        );
+        game.projectiles.push(new Projectile(this.x, this.y, this.attackTarget, damage, this.team, this));
         this.attackCooldown = this.attackSpeed;
     }
 
@@ -1739,27 +1782,21 @@ class Catapult extends Entity {
         ctx.stroke();
 
         const barWidth = 40;
-
         ctx.fillStyle = '#000';
         ctx.fillRect(screenX - 20, screenY - 35, barWidth, 5);
-
         ctx.fillStyle = '#4caf50';
-        ctx.fillRect(
-            screenX - 20,
-            screenY - 35,
-            barWidth * (this.hp / this.maxHp),
-            5
-        );
+        ctx.fillRect(screenX - 20, screenY - 35, barWidth * (this.hp / this.maxHp), 5);
     }
 }
 
 class Tower extends Entity {
-    constructor(x, y, team) {
+    constructor(x, y, team, tier) {
         super(x, y, team, 32, 4500, 85, 0);
         this.attackRange = 360;
         this.attackSpeed = 1.3;
         this.glyphActive = false;
         this.glyphTimer = 0;
+        this.tier = tier;
     }
     update(dt) {
         if (this.isDead) return;
@@ -1845,7 +1882,7 @@ class Fountain {
         ctx.save();
         ctx.shadowBlur = 25; ctx.shadowColor = this.team === 'radiant' ? '#00bfff' : '#ff4500';
         ctx.fillStyle = this.team === 'radiant' ? 'rgba(0,191,255,0.15)' : 'rgba(255,69,0,0.15)';
-        ctx.beginPath(); ctx.arc(sx, sy, this.radius, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(sx, sy, this.radius, 0, Math.PI * 2); ctx.fill();
         ctx.shadowBlur = 0; ctx.fillStyle = '#2f4f4f'; ctx.beginPath(); ctx.arc(sx, sy, 30, 0, Math.PI*2); ctx.fill();
         ctx.restore();
     }
@@ -1874,8 +1911,8 @@ class Projectile {
                     let pushDistance = 35;
                     this.target.x += (dx / dist) * pushDistance;
                     this.target.y += (dy / dist) * pushDistance;
-                    this.target.x = Math.max(50, Math.min(3150, this.target.x));
-                    this.target.y = Math.max(50, Math.min(850, this.target.y));
+                    this.target.x = Math.max(50, Math.min(7950, this.target.x));
+                    this.target.y = Math.max(50, Math.min(5950, this.target.y));
                 }
                 
                 game.uiManager.addFloatingText(this.target.x, this.target.y - 30, "HEADSHOT", '#ffa500');
@@ -1911,37 +1948,29 @@ class Projectile {
 
 class BountyRune {
     constructor(x, y) {
-        this.x = x;
-        this.y = y;
-        this.radius = 12;
-        this.clickRadius = 35;
+        this.x = x; this.y = y;
+        this.radius = 12; this.clickRadius = 35;
         this.isSpawned = true;
         this.respawnTimer = 0;
         this.respawnCooldown = 60;
         this.goldReward = 70;
         this.color = '#f59e0b';
     }
-
     isClicked(mouseX, mouseY) {
         if (!this.isSpawned) return false;
         const dx = mouseX - this.x;
         const dy = mouseY - this.y;
         return Math.hypot(dx, dy) <= this.clickRadius;
     }
-
     update(dt) {
         if (!this.isSpawned) {
             this.respawnTimer -= dt;
-            if (this.respawnTimer <= 0) {
-                this.isSpawned = true;
-            }
+            if (this.respawnTimer <= 0) this.isSpawned = true;
         }
     }
-
     draw(ctx, camera) {
         const screenX = this.x - camera.x;
         const screenY = this.y - camera.y;
-
         ctx.save();
         ctx.beginPath();
         ctx.arc(screenX, screenY, 35, 0, Math.PI * 2);
@@ -1952,7 +1981,6 @@ class BountyRune {
         ctx.setLineDash([6, 4]);
         ctx.stroke();
         ctx.restore();
-
         if (this.isSpawned) {
             const pulse = 1 + Math.sin(Date.now() * 0.005) * 0.1;
             ctx.beginPath();
@@ -1962,7 +1990,6 @@ class BountyRune {
             ctx.strokeStyle = '#fff';
             ctx.lineWidth = 2;
             ctx.stroke();
-
             ctx.fillStyle = '#fff';
             ctx.font = 'bold 12px Arial';
             ctx.textAlign = 'center';
@@ -1970,7 +1997,6 @@ class BountyRune {
             ctx.fillText('$', screenX, screenY);
         }
     }
-
     pickup(hero) {
         if (!this.isSpawned) return;
         this.isSpawned = false;
@@ -1986,256 +2012,139 @@ class BountyRune {
     }
 }
 
-// --- УМНЫЙ ИСКУССТВЕННЫЙ ИНТЕЛЕКТ (AI) ---
+// ----------------------------------------------
+// БАРАКИ
+// ----------------------------------------------
+class Barracks {
+    constructor(x, y, team, type, lane) {
+        this.x = x;
+        this.y = y;
+        this.team = team;
+        this.type = type;
+        this.lane = lane;
+        this.radius = 20;
+        this.maxHp = 1200;
+        this.hp = 1200;
+        this.isDead = false;
+        this.armor = 5;
+    }
+    takeDamage(amount, attacker) {
+        if (this.isDead) return;
+        let reduction = this.armor / (this.armor + 100);
+        amount = Math.max(1, amount * (1 - reduction));
+        this.hp -= amount;
+        if (this.hp <= 0) {
+            this.hp = 0;
+            this.isDead = true;
+            audio.play('tower_break');
+        }
+    }
+    update(dt) {}
+    draw(ctx, camera) {
+        if (this.isDead) return;
+        const sx = this.x - camera.x;
+        const sy = this.y - camera.y;
+        ctx.save();
+        ctx.fillStyle = this.team === 'radiant' ? '#2d7d2d' : '#7d2d2d';
+        ctx.strokeStyle = '#d4af37';
+        ctx.lineWidth = 2;
+        ctx.fillRect(sx - 18, sy - 14, 36, 28);
+        ctx.strokeRect(sx - 18, sy - 14, 36, 28);
+        ctx.fillStyle = '#fff';
+        ctx.font = '10px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(this.type === 'melee' ? '⚔️' : '🏹', sx, sy);
+        ctx.restore();
+        const barW = 40, barH = 4;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(sx - barW/2, sy - 22, barW, barH);
+        ctx.fillStyle = this.team === 'radiant' ? '#33ff33' : '#ff3333';
+        ctx.fillRect(sx - barW/2, sy - 22, barW * (this.hp/this.maxHp), barH);
+    }
+}
+
+// ----------------------------------------------
+// ИСКУССТВЕННЫЙ ИНТЕЛЛЕКТ (упрощённый)
+// ----------------------------------------------
 class AIController {
     constructor(hero) { 
         this.hero = hero; 
         this.shopTimer = 0; 
+        this.currentLane = 'mid';
     }
-
     update(dt) {
         if (this.hero.isDead) return;
         this.shopTimer += dt; 
         if (this.shopTimer > 4) { this.shopTimer = 0; this.buyLogic(); }
 
-        let targetRune = null;
-        if (game.bountyRunes && game.bountyRunes.length > 0) {
-            let activeRunes = game.bountyRunes.filter(r => r && !r.isPickedUp);
-            let minRuneDist = 700; 
-
-            for (let rune of activeRunes) {
-                let d = Math.hypot(rune.x - this.hero.x, rune.y - this.hero.y);
-                if (d < minRuneDist) {
-                    minRuneDist = d;
-                    targetRune = rune;
-                }
-            }
-        }
-
-        if (targetRune) {
-            let distToRune = Math.hypot(targetRune.x - this.hero.x, targetRune.y - this.hero.y);
-            
-            if (distToRune <= 40) {
-                targetRune.isPickedUp = true;
-                
-                if (typeof targetRune.pickUp === 'function') {
-                    targetRune.pickUp(this.hero);
-                } else {
-                    this.hero.gold += 100; 
-                    if (game.uiManager) game.uiManager.addFloatingText(this.hero.x, this.hero.y - 40, "+100 🪙", '#ffd700');
-                }
-                
-                this.hero.attackTarget = null;
-            } else {
-                this.hero.attackTarget = null;
-                this.hero.moveTo(targetRune.x, targetRune.y);
-                return; 
-            }
-        }
-
-        // Все боты, кроме Хускара, возвращаются на фонтан при < 30% HP
-        if (!(this.hero instanceof Huskar) && (this.hero.hp / this.hero.maxHp < 0.3 || this.hero.isHealingAtFountain)) {
+        const fountain = this.hero.team === 'radiant' ? game.fountains[0] : game.fountains[1];
+        if (this.hero.hp / this.hero.maxHp < 0.3 && Math.hypot(this.hero.x - fountain.x, this.hero.y - fountain.y) > 150) {
             this.hero.attackTarget = null;
-            this.hero.isHealingAtFountain = true;
-            this.hero.moveTo(
-                this.hero.team === 'radiant' ? 40 : 3160,
-                game.map.laneY
-            );
-
+            this.hero.moveTo(fountain.x, fountain.y);
+            return;
+        } else if (Math.hypot(this.hero.x - fountain.x, this.hero.y - fountain.y) < 150) {
             if (this.hero.hp >= this.hero.maxHp) {
-                this.hero.hp = this.hero.maxHp;
-                this.hero.isHealingAtFountain = false;
+                this.hero.moveTo(this.hero.team === 'radiant' ? 1000 : 7000, this.hero.y);
             }
-
             return;
         }
-        this.hero.isHealingAtFountain = false;
 
-        let alliedTowers = game.towers.filter(t => t.team === this.hero.team && !t.isDead);
-        let threatenedTower = alliedTowers.find(tower => {
-            let attackers = (tower.team === 'radiant' ? game.direEntities() : game.radiantEntities())
-                .filter(e => !e.isDead && Math.hypot(e.x - tower.x, e.y - tower.y) <= 420);
-            return attackers.length >= 2;
-        });
-
-        if (threatenedTower && game.glyphCooldown[this.hero.team] <= 0 && !game.glyphActive[this.hero.team]) {
-            game.activateGlyphForTeam(this.hero.team);
+        let lane = this.determineLane();
+        this.currentLane = lane;
+        const enemies = this.hero.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+        const laneY = game.map.lanes[lane].y;
+        let target = null;
+        let minDist = Infinity;
+        for (let e of enemies) {
+            if (e.isDead) continue;
+            if (Math.abs(e.y - laneY) > 150) continue;
+            const d = Math.hypot(e.x - this.hero.x, e.y - this.hero.y);
+            if (d < minDist) {
+                minDist = d;
+                target = e;
+            }
+        }
+        if (target && minDist < 600) {
+            this.hero.attackTarget = target;
+        } else {
             this.hero.attackTarget = null;
-            return;
-        }
-
-        let enemies = this.hero.team === 'radiant' ? game.direEntities() : game.radiantEntities();
-        let allies = this.hero.team === 'radiant' ? game.radiantEntities() : game.direEntities();
-
-        if (this.hero instanceof Morphling) {
-            let castRange = this.hero.attackRange + 150;
-            let targetEnemy = enemies.find(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) <= castRange && !e.isDead);
-
-            if (targetEnemy && this.hero.abilities[1].currentCooldown === 0 && this.hero.mp >= 100) {
-                this.hero.attackTarget = targetEnemy;
-                this.hero.useAbility(1);
-            }
-
-            let currentHpPct = this.hero.hp / this.hero.maxHp;
-
-            if (currentHpPct < 0.6) {
-                let underAttack = enemies.some(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 500);
-                if (underAttack && !this.hero.isShiftingStrength && this.hero.baseAgility > this.hero.minStatLimit) {
-                    this.hero.useAbility(3); 
-                }
-            } else if (currentHpPct > 0.85 && targetEnemy) {
-                if (!this.hero.isShiftingAgility && this.hero.baseStrength > this.hero.minStatLimit) {
-                    this.hero.useAbility(2); 
-                }
-            } else {
-                if (this.hero.isShiftingAgility && currentHpPct < 0.7) {
-                    this.hero.useAbility(2); 
-                }
-                if (this.hero.isShiftingStrength && currentHpPct > 0.8) {
-                    this.hero.useAbility(3); 
-                }
-            }
-
-            if (this.hero.abilities[0].currentCooldown === 0 && this.hero.mp >= 90) {
-                let enemiesInWave = enemies.filter(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 300);
-                if (enemiesInWave.length >= 2) {
-                    this.hero.useAbility(0);
-                }
-            }
-        } 
-        else if (this.hero instanceof Sniper) {
-            if (this.hero.shrapnelCharges > 0 && Math.random() < 0.05) {
-                let targetCreepOrHero = enemies.find(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 500);
-                if (targetCreepOrHero && this.hero.mp >= this.hero.abilities[0].manaCost) {
-                    this.hero.useAbility(0);
-                }
-            }
-            if (this.hero.abilities[2].currentCooldown === 0 && this.hero.aimTimer <= 0 && this.hero.mp >= this.hero.abilities[2].manaCost) {
-                if (enemies.some(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) <= this.hero.attackRange + 100)) {
-                    this.hero.useAbility(2);
-                }
-            }
-            if (this.hero.abilities[3].currentCooldown === 0 && this.hero.assChannel <= 0 && this.hero.mp >= this.hero.abilities[3].manaCost) {
-                let lowHpEnemy = enemies.find(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 950 && e.hp < 400 && !e.isDead);
-                if (lowHpEnemy) {
-                    this.hero.attackTarget = lowHpEnemy;
-                    this.hero.useAbility(3);
-                }
-            }
-        } 
-        else if (this.hero instanceof Warlock) {
-            if (this.hero.isChannelingUpheaval) {
-                let enemiesInUpheaval = enemies.filter(e => Math.hypot(e.x - this.hero.upheavalX, e.y - this.hero.upheavalY) <= 575);
-                if (enemiesInUpheaval.length === 0) {
-                    this.hero.useAbility(2); 
-                } else {
-                    return; 
-                }
-            }
-
-            if (this.hero.abilities[0].currentCooldown === 0 && this.hero.mp >= this.hero.abilities[0].manaCost) {
-                let nearby = enemies.filter(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 700 && !(e._fbTimer > 0));
-                if (nearby.length >= 2) {
-                    this.hero.useAbility(0);
-                }
-            }
-
-            if (this.hero.level >= 6 && this.hero.abilities[3].currentCooldown === 0 && this.hero.mp >= this.hero.abilities[3].manaCost) {
-                let clumpedTarget = enemies.find(e => {
-                    return enemies.filter(other => Math.hypot(other.x - e.x, other.y - e.y) <= 600).length >= 2;
-                });
-                if (clumpedTarget && Math.hypot(clumpedTarget.x - this.hero.x, clumpedTarget.y - this.hero.y) <= 800) {
-                    this.hero.attackTarget = clumpedTarget;
-                    this.hero.useAbility(3);
-                }
-            }
-
-            if (this.hero.abilities[1].currentCooldown === 0 && this.hero.mp >= this.hero.abilities[1].manaCost) {
-                let lowHpAlly = allies.find(a => a.hp / a.maxHp < 0.4 && Math.hypot(a.x - this.hero.x, a.y - this.hero.y) < 600);
-                if (lowHpAlly) {
-                    this.hero.attackTarget = lowHpAlly;
-                    this.hero.useAbility(1);
-                } else {
-                    let clumpedEnemy = enemies.find(e => {
-                        return enemies.filter(other => Math.hypot(other.x - e.x, other.y - e.y) <= 300).length >= 2;
-                    });
-                    if (clumpedEnemy && Math.hypot(clumpedEnemy.x - this.hero.x, clumpedEnemy.y - this.hero.y) <= 600) {
-                        this.hero.attackTarget = clumpedEnemy;
-                        this.hero.useAbility(1);
-                    }
-                }
-            }
-
-            if (this.hero.abilities[2].currentCooldown === 0 && this.hero.mp >= this.hero.abilities[2].manaCost) {
-                let enemiesNear = enemies.filter(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 500);
-                if (enemiesNear.length > 0) {
-                    this.hero.attackTarget = enemiesNear[0];
-                    this.hero.useAbility(2);
-                    return; 
-                }
+            const waypoints = this.hero.team === 'radiant' ? game.map.waypoints[lane] : game.map.waypointsReverse[lane];
+            if (waypoints && waypoints.length > 0) {
+                const targetWp = waypoints[waypoints.length - 1];
+                this.hero.moveTo(targetWp.x, targetWp.y);
             }
         }
-        else if (this.hero instanceof Bristleback) {
-            if (this.hero.abilities[0].currentCooldown === 0 && this.hero.mp >= this.hero.abilities[0].manaCost) {
-                let target = enemies.find(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) <= 500);
-                if (target) {
-                    this.hero.attackTarget = target;
-                    this.hero.useAbility(0);
-                }
-            }
-            if (this.hero.abilities[1].currentCooldown === 0 && this.hero.mp >= this.hero.abilities[1].manaCost) {
-                let targetCount = enemies.filter(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) <= 500).length;
-                if (targetCount >= 2 || this.hero.hp / this.hero.maxHp < 0.5) {
-                    this.hero.useAbility(1);
-                }
-            }
-        }
-        else if (this.hero instanceof Huskar) {
-            // Если у Хускара критически мало здоровья (меньше 5%), он немного отступает назад
-            if (this.hero.hp / this.hero.maxHp < 0.05) {
-                this.hero.attackTarget = null; // Сбрасываем цель атаки, чтобы не бежал вперед
-                // Вычисляем точку отхода назад (в сторону фонтана своей команды)
-                let retreatX = this.hero.team === 'radiant' ? Math.max(40, this.hero.x - 100) : Math.min(3160, this.hero.x + 100);
-                this.hero.moveTo(retreatX, game.map.laneY);
-                
-                if (!this.hero.burningSpearActive) this.hero.useAbility(1); // Стрелы всё равно держим активными
-                return; // Прерываем выполнение шага ИИ, чтобы бот гарантированно отступал, а не шел в атаку ниже по коду
-            }
 
-            // Обычная логика каста способностей (активна, если HP >= 5%)
+        if (this.hero instanceof Huskar) {
+            if (!this.hero.burningSpearActive) this.hero.useAbility(1);
             if (this.hero.abilities[0].currentCooldown === 0 && this.hero.hp > 200) {
                 let enemiesNear = enemies.filter(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 250);
                 if (enemiesNear.length > 0) this.hero.useAbility(0);
             }
             if (this.hero.abilities[3].currentCooldown === 0 && this.hero.hp > 300) {
-                let target = enemies.find(e => Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 500 && e instanceof Hero);
-                if (target) {
-                    this.hero.attackTarget = target;
+                let targetHero = enemies.find(e => e instanceof Hero && Math.hypot(e.x - this.hero.x, e.y - this.hero.y) < 500);
+                if (targetHero) {
+                    this.hero.attackTarget = targetHero;
                     this.hero.useAbility(3);
                 }
             }
-            
-            // Горящие стрелы теперь включены всегда (если были выключены — включаем)
-            if (!this.hero.burningSpearActive) {
-                this.hero.useAbility(1);
-            }
-        }
-
-        let target = null; 
-        let minDist = Infinity;
-        for (let e of enemies) {
-            let d = Math.hypot(e.x - this.hero.x, e.y - this.hero.y);
-            if (d < minDist) { minDist = d; target = e; }
-        }
-        
-        if (target && minDist < 450) { 
-            this.hero.attackTarget = target; 
-        } else { 
-            this.hero.attackTarget = null; 
-            this.hero.moveTo(this.hero.team === 'radiant' ? 2200 : 1000, game.map.laneY); 
         }
     }
-
+    determineLane() {
+        const y = this.hero.y;
+        const lanes = game.map.lanes;
+        let closest = 'mid';
+        let minDist = Infinity;
+        for (let [name, data] of Object.entries(lanes)) {
+            const d = Math.abs(y - data.y);
+            if (d < minDist) {
+                minDist = d;
+                closest = name;
+            }
+        }
+        return closest;
+    }
     buyLogic() {
         if (this.hero.gold >= 1500) {
             let i = new Item('sword', 'Crystalys', 1500, { damageBonus: 32, critChance: 0.3, critMultiplier: 1.6 });
@@ -2244,7 +2153,9 @@ class AIController {
     }
 }
 
-// --- УПРАВЛЕНИЕ ИНТЕРФЕЙСОМ (UI) ---
+// ----------------------------------------------
+// UI Менеджер
+// ----------------------------------------------
 class UIManager {
     constructor() { this.floatTexts = []; }
     addFloatingText(x, y, text, color) { this.floatTexts.push({ x, y, text, color, life: 1.0 }); }
@@ -2385,8 +2296,13 @@ class UIManager {
         const mCanvas = document.getElementById('minimapCanvas'); const mCtx = mCanvas.getContext('2d');
         if (!mCanvas) return;
         mCtx.clearRect(0,0,150,150); mCtx.fillStyle = '#151c12'; mCtx.fillRect(0,0,150,150);
-        mCtx.fillStyle = '#2d251e'; mCtx.fillRect(0, 65, 150, 20);
-        let toM = (x, y) => ({ x: (x / 4000) * 150, y: (y / 900) * 150 });
+        for (let lane of ['top', 'mid', 'bottom']) {
+            const y = game.map.lanes[lane].y;
+            const yM = (y / 6000) * 150;
+            mCtx.fillStyle = '#3a5a3a';
+            mCtx.fillRect(0, yM-3, 150, 6);
+        }
+        let toM = (x, y) => ({ x: (x / 8000) * 150, y: (y / 6000) * 150 });
         let drawDots = (list, color, r) => {
             mCtx.fillStyle = color;
             for (let e of list) { if (e.isDead) continue; let pos = toM(e.x, e.y); mCtx.beginPath(); mCtx.arc(pos.x, pos.y, r, 0, Math.PI*2); mCtx.fill(); }
@@ -2402,43 +2318,89 @@ class UIManager {
     }
 }
 
-// --- ЯДРО ДВИЖКА ИГРЫ ---
+// ----------------------------------------------
+// ОСНОВНОЙ КЛАСС ИГРЫ
+// ----------------------------------------------
 class Game {
     constructor() {
-        this.map = new GameMap(); this.camera = new Camera(this.map); this.uiManager = new UIManager();
-        this.playerHero = null; this.enemyHero = null; this.aiController = null;
-        this.creeps = []; this.towers = []; this.ancients = []; this.fountains = []; this.projectiles = [];
+        this.map = new GameMap(); 
+        this.camera = new Camera(this.map); 
+        this.uiManager = new UIManager();
+        this.playerHero = null; 
+        this.enemyHero = null; 
+        this.aiController = null;
+        this.creeps = []; 
+        this.towers = []; 
+        this.barracks = [];
+        this.ancients = []; 
+        this.fountains = []; 
+        this.projectiles = [];
         this.shrapnelZones = [];
         this.effects = [];
-        this.matchTime = 0; this.creepTimer = 0; this.lastTime = performance.now();
+        this.matchTime = 0; 
+        this.creepTimer = 0; 
+        this.lastTime = performance.now();
         this.globalSpeedMultiplier = 0.75; 
-        this.glyphCooldown = { radiant: 0, dire: 0 }; this.glyphMaxCooldown = 60;
-        this.glyphActive = { radiant: false, dire: false }; this.glyphDuration = 8; this.glyphTimer = { radiant: 0, dire: 0 };
+        this.glyphCooldown = { radiant: 0, dire: 0 }; 
+        this.glyphMaxCooldown = 60;
+        this.glyphActive = { radiant: false, dire: false }; 
+        this.glyphDuration = 8; 
+        this.glyphTimer = { radiant: 0, dire: 0 };
         this.glyphShieldReduction = 0.4;
         this.waveNumber = 0;
         this.bountyRunes = [
-            new BountyRune(220, 260),
-            new BountyRune(2980, 260)
+            new BountyRune(400, 1400),
+            new BountyRune(7600, 4600)
         ];
-        
-        this.initWorld(); this.initInput();
+        this.initWorld(); 
+        this.initInput();
     }
+
     initWorld() {
-        this.ancients.push(new Ancient(180, this.map.laneY, 'radiant')); this.ancients.push(new Ancient(3020, this.map.laneY, 'dire'));
-        this.towers.push(new Tower(650, this.map.laneY, 'radiant')); this.towers.push(new Tower(1200, this.map.laneY, 'radiant'));
-        this.towers.push(new Tower(2550, this.map.laneY, 'dire')); this.towers.push(new Tower(2000, this.map.laneY, 'dire'));
-        this.fountains.push(new Fountain(40, this.map.laneY, 'radiant')); this.fountains.push(new Fountain(3160, this.map.laneY, 'dire'));
+        // Троны
+        this.ancients.push(new Ancient(400, 5700, 'radiant'));
+        this.ancients.push(new Ancient(7600, 300, 'dire'));
+        // Фонтаны
+        this.fountains.push(new Fountain(300, 5800, 'radiant'));
+        this.fountains.push(new Fountain(7700, 200, 'dire'));
+
+        // Координаты башен (T1, T2, T3) для каждой линии (y разный)
+        const lanes = ['top', 'mid', 'bottom'];
+        const towerX = {
+            radiant: [1800, 2800, 3800],
+            dire:    [6200, 5200, 4200]
+        };
+        for (let lane of lanes) {
+            const y = this.map.lanes[lane].y;
+            // Radiant башни
+            for (let i = 0; i < 3; i++) {
+                this.towers.push(new Tower(towerX.radiant[i], y, 'radiant', i+1));
+            }
+            // Dire башни
+            for (let i = 0; i < 3; i++) {
+                this.towers.push(new Tower(towerX.dire[i], y, 'dire', i+1));
+            }
+            // Бараки: Radiant за T3 (перед троном), Dire перед T3 (после трона)
+            // Бараки размещаем между T3 и троном, например на x = 3200 для Radiant, на x = 4800 для Dire
+            this.barracks.push(new Barracks(3200, y - 30, 'radiant', 'melee', lane));
+            this.barracks.push(new Barracks(3200, y + 30, 'radiant', 'ranged', lane));
+            this.barracks.push(new Barracks(4800, y - 30, 'dire', 'melee', lane));
+            this.barracks.push(new Barracks(4800, y + 30, 'dire', 'ranged', lane));
+        }
     }
+
     start(selectedHeroName) {
         audio.init();
-        this.playerHero = this.createHero(selectedHeroName, 200, this.map.laneY, 'radiant');
+        this.playerHero = this.createHero(selectedHeroName, 400, 5700, 'radiant');
         const pool = ['Morphling', 'Warlock', 'Sniper', 'Bristleback', 'Huskar'];
-        this.enemyHero = this.createHero(pool[Math.floor(Math.random() * pool.length)], 3000, this.map.laneY, 'dire');
+        this.enemyHero = this.createHero(pool[Math.floor(Math.random() * pool.length)], 7600, 300, 'dire');
         this.aiController = new AIController(this.enemyHero);
         document.getElementById('hero-selection').classList.add('hidden');
         document.getElementById('game-screen').classList.remove('hidden');
-        this.lastTime = performance.now(); requestAnimationFrame((t) => this.loop(t));
+        this.lastTime = performance.now(); 
+        requestAnimationFrame((t) => this.loop(t));
     }
+
     createHero(name, x, y, team) {
         if (name === 'Morphling') return new Morphling(x, y, team);
         if (name === 'Warlock') return new Warlock(x, y, team);
@@ -2446,27 +2408,38 @@ class Game {
         if (name === 'Huskar') return new Huskar(x, y, team);
         return new Sniper(x, y, team);
     }
+
     radiantEntities() {
         return [this.playerHero, ...this.creeps.filter(c => c.team==='radiant'), ...this.towers.filter(t => t.team==='radiant'), ...this.ancients.filter(a => a.team==='radiant')].filter(e => e && !e.isDead);
     }
+
     direEntities() {
         return [this.enemyHero, ...this.creeps.filter(c => c.team==='dire'), ...this.towers.filter(t => t.team==='dire'), ...this.ancients.filter(a => a.team==='dire')].filter(e => e && !e.isDead);
     }
+
     spawnWave() {
         this.waveNumber++;
-        for (let i = 0; i < 3; i++) {
-            this.creeps.push(new Creep(350 + i*10, this.map.laneY - 20 + i*15, 'radiant', 'melee'));
-            this.creeps.push(new Creep(2850 - i*10, this.map.laneY - 20 + i*15, 'dire', 'melee'));
+        const lanes = ['top', 'mid', 'bottom'];
+        for (let lane of lanes) {
+            const y = this.map.lanes[lane].y;
+            // Меле крипы (3 шт)
+            for (let i = 0; i < 3; i++) {
+                const offsetX = 50 + i * 20;
+                const offsetY = (i - 1) * 15;
+                this.creeps.push(new Creep(600 + offsetX, y + offsetY, 'radiant', 'melee', lane));
+                this.creeps.push(new Creep(7400 - offsetX, y + offsetY, 'dire', 'melee', lane));
+            }
+            // Рейндж крип
+            this.creeps.push(new Creep(650, y - 20, 'radiant', 'ranged', lane));
+            this.creeps.push(new Creep(7350, y - 20, 'dire', 'ranged', lane));
+            // Катапульта каждые 3 волны
+            if (this.waveNumber % 3 === 0) {
+                this.creeps.push(new Catapult(700, y - 30, 'radiant', lane));
+                this.creeps.push(new Catapult(7300, y - 30, 'dire', lane));
+            }
         }
-        this.creeps.push(new Creep(320, this.map.laneY, 'radiant', 'ranged'));
-        this.creeps.push(new Creep(2880, this.map.laneY, 'dire', 'ranged'));
-
-        if (this.waveNumber % 3 === 0) {
-            this.creeps.push(new Catapult(350, 470, 'radiant'));
-            this.creeps.push(new Catapult(3650, 470, 'dire'));
-        }
-        
     }
+
     initInput() {
         canvas.addEventListener('mousedown', (e) => {
             if (e.button !== 2) return; 
@@ -2534,8 +2507,10 @@ class Game {
             }
         });
     }
+
     toggleShop() { document.getElementById('shop-modal').classList.toggle('hidden'); }
     activateGlyph() { this.activateGlyphForTeam(this.playerHero?.team); }
+
     activateGlyphForTeam(team) {
         if (!team || this.glyphCooldown[team] > 0 || this.glyphActive[team]) return false;
         this.glyphActive[team] = true;
@@ -2554,6 +2529,7 @@ class Game {
         }
         return true;
     }
+
     buyItem(type) {
         let p = this.playerHero; let it = null;
         if (type === 'boots') it = new Item('boots', 'Boots of Speed', 500, { speedBonus: 30 });
@@ -2568,11 +2544,13 @@ class Game {
             if (it.id === 'linkens') { p.hasLinkens = true; p.linkensCooldown = 0; }
         }
     }
+
     loop(time) {
         let dt = (time - this.lastTime) / 1000; this.lastTime = time;
         if (dt > 0.1) dt = 0.1; this.update(dt); this.render();
         requestAnimationFrame((t) => this.loop(t));
     }
+
     update(dt) {
         this.matchTime += dt; this.creepTimer += dt;
         for (let team of ['radiant', 'dire']) {
@@ -2591,30 +2569,28 @@ class Game {
         this.playerHero.update(dt); this.enemyHero.update(dt); this.aiController.update(dt);
         for (let i = this.creeps.length - 1; i >= 0; i--) { if (this.creeps[i].isDead) this.creeps.splice(i, 1); else this.creeps[i].update(dt); }
         for (let t of this.towers) t.update(dt);
+        for (let b of this.barracks) b.update(dt);
         if (this.bountyRunes) {
             for (let rune of this.bountyRunes) rune.update(dt);
         }
         for (let f of this.fountains) f.update(dt);
         for (let i = this.projectiles.length - 1; i >= 0; i--) { if (this.projectiles[i].update(dt)) this.projectiles.splice(i, 1); }
-        
         for (let i = this.shrapnelZones.length - 1; i >= 0; i--) {
             if (this.shrapnelZones[i].update(dt)) this.shrapnelZones.splice(i, 1);
         }
-
         for (let i = this.effects.length - 1; i >= 0; i--) {
             this.effects[i].life -= dt;
             if (this.effects[i].life <= 0) this.effects.splice(i, 1);
         }
-        
         this.camera.update(this.playerHero.x, this.playerHero.y); this.uiManager.update(dt);
     }
+
     render() {
         ctx.clearRect(0, 0, canvas.width, canvas.height); this.map.draw(ctx, this.camera);
-        
         for (let zone of this.shrapnelZones) zone.draw(ctx, this.camera);
-        
         for (let f of this.fountains) f.draw(ctx, this.camera);
         for (let t of this.towers) t.draw(ctx, this.camera);
+        for (let b of this.barracks) b.draw(ctx, this.camera);
         if (this.bountyRunes) {
             for (let rune of this.bountyRunes) rune.draw(ctx, this.camera);
         }
@@ -2635,6 +2611,7 @@ class Game {
         }
         this.uiManager.draw(ctx, this.camera);
     }
+
     endGame(wonTeam) {
         document.getElementById('game-screen').classList.add('hidden');
         let scr = document.getElementById('end-screen'); let title = document.getElementById('end-title');
