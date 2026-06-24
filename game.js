@@ -1739,10 +1739,18 @@ class Creep extends Entity {
         if (!attacker) return;
         if (attacker instanceof Hero) {
             let b = this.type === 'melee' ? 42 : 58; attacker.gold += b;
-            if (attacker === game.playerHero) game.uiManager.addFloatingText(this.x, this.y - 15, `+${b} 🪙`, '#ffd700');
+            if (attacker === game.playerHero) {
+                game.uiManager.addFloatingText(this.x, this.y - 15, `+${b} 🪙`, '#ffd700');
+            }
         }
-        let heroes = [game.playerHero, game.enemyHero].filter(h => h && !h.isDead);
-        for (let h of heroes) { if (Math.hypot(h.x - this.x, h.y - this.y) < 600) h.addXp(40); }
+        // Раздаём опыт всем героям в радиусе
+        const allHeroes = game.getAllHeroes();
+        for (let h of allHeroes) {
+            if (h.isDead) continue;
+            if (Math.hypot(h.x - this.x, h.y - this.y) < 600) {
+                h.addXp(40);
+            }
+        }
     }
 
     draw(ctx, camera) {
@@ -2002,10 +2010,11 @@ class Ancient extends Entity {
 class Fountain {
     constructor(x, y, team) { this.x = x; this.y = y; this.team = team; this.radius = 150; }
     update(dt) {
-        let heroes = [game.playerHero, game.enemyHero].filter(h => h && !h.isDead && h.team === this.team);
+        let heroes = [game.playerHero, ...game.alliedBots, game.enemyHero, ...game.enemyBots].filter(h => h && !h.isDead && h.team === this.team);
         for (let h of heroes) {
             if (Math.hypot(h.x - this.x, h.y - this.y) <= this.radius) {
-                h.hp = Math.min(h.maxHp, h.hp + 100 * dt); h.mp = Math.min(h.maxMp, h.mp + 100 * dt);
+                h.hp = Math.min(h.maxHp, h.hp + 100 * dt);
+                h.mp = Math.min(h.maxMp, h.mp + 100 * dt);
             }
         }
     }
@@ -2229,7 +2238,7 @@ class Barracks {
 }
 
 // ----------------------------------------------
-// НОВЫЙ КЛАСС ИИ ДЛЯ БОТОВ
+// НОВЫЙ КЛАСС ИИ ДЛЯ БОТОВ (исправленный)
 // ----------------------------------------------
 class BotAI {
     constructor(hero, lane, game) {
@@ -2241,8 +2250,7 @@ class BotAI {
         this.waypoints = hero.team === 'radiant' ? game.map.waypoints[lane] : game.map.waypointsReverse[lane];
         this.waypointIndex = 0;
         this.retreatThreshold = 0.10; // 10% hp
-        this.target = null;
-        this.attackCooldown = 0;
+        this.abilityTimer = 0;
     }
 
     update(dt) {
@@ -2255,8 +2263,8 @@ class BotAI {
         // Переход в режим отступления
         if (hpPercent <= this.retreatThreshold && this.state !== 'heal') {
             this.state = 'retreat';
-            this.hero.attackTarget = null;
-            this.hero.moveTo(this.fountain.x, this.fountain.y);
+            hero.attackTarget = null;
+            hero.moveTo(this.fountain.x, this.fountain.y);
         }
 
         // Если на базе и здоровье не полное, лечимся
@@ -2264,78 +2272,58 @@ class BotAI {
             const dist = Math.hypot(hero.x - this.fountain.x, hero.y - this.fountain.y);
             if (dist < this.fountain.radius) {
                 this.state = 'heal';
-                // Лечение
-                hero.hp = Math.min(hero.maxHp, hero.hp + 100 * dt);
+                // Лечение выполняется в Fountain.update, здесь ничего не делаем
                 if (hero.hp >= hero.maxHp) {
                     // Полностью вылечились, возвращаемся на линию
                     this.state = 'normal';
-                    this.hero.attackTarget = null;
-                    // Идём к первой waypoint
+                    hero.attackTarget = null;
                     if (this.waypoints && this.waypoints.length > 0) {
                         this.waypointIndex = 0;
-                        this.hero.moveTo(this.waypoints[0].x, this.waypoints[0].y);
+                        hero.moveTo(this.waypoints[0].x, this.waypoints[0].y);
                     }
                 }
-                // В режиме лечения не двигаемся
                 return;
-            } else {
-                // Если ещё не дошли до фонтана, продолжаем двигаться
-                // (но установлено moveTo в retreat)
-                // Здесь ничего не делаем, движение уже задано
             }
+            // Если ещё не дошли до фонтана, продолжаем двигаться (moveTo уже установлен)
+            return;
         }
 
-        // Если в нормальном режиме, выбираем цель и двигаемся
+        // В нормальном режиме выбираем цель и двигаемся
         if (this.state === 'normal') {
             // Поиск целей по приоритету
             const target = this.selectTarget();
             if (target) {
-                this.hero.attackTarget = target;
-                // Если цель в радиусе атаки, атакуем
-                const d = Math.hypot(this.hero.x - target.x, this.hero.y - target.y);
-                if (d <= this.hero.attackRange && this.hero.attackCooldown <= 0) {
-                    this.hero.performAttack();
-                    this.hero.attackCooldown = this.hero.attackSpeed;
+                hero.attackTarget = target;
+                // Если цель вне радиуса атаки, двигаемся к ней
+                const d = Math.hypot(hero.x - target.x, hero.y - target.y);
+                if (d > hero.attackRange * 0.85) {
+                    hero.moveTo(target.x, target.y);
                 }
-                // Если цель вне радиуса, двигаемся к ней
-                if (d > this.hero.attackRange * 0.85) {
-                    this.hero.moveTo(target.x, target.y);
+                // Использование способностей (не чаще 1 раза в 2 секунды)
+                this.abilityTimer += dt;
+                if (this.abilityTimer > 2.0) {
+                    this.abilityTimer = 0;
+                    this.useAbilities(target);
                 }
             } else {
                 // Нет целей, двигаемся по waypoints
-                this.hero.attackTarget = null;
+                hero.attackTarget = null;
                 if (this.waypoints && this.waypoints.length > 0) {
-                    // Если достигли последней waypoint, остаёмся на месте
                     if (this.waypointIndex >= this.waypoints.length) {
-                        // Ничего не делаем, стоим
+                        // Стоим на месте
                     } else {
                         const wp = this.waypoints[this.waypointIndex];
-                        const dist = Math.hypot(this.hero.x - wp.x, this.hero.y - wp.y);
+                        const dist = Math.hypot(hero.x - wp.x, hero.y - wp.y);
                         if (dist < 20) {
                             this.waypointIndex++;
                             if (this.waypointIndex < this.waypoints.length) {
-                                this.hero.moveTo(this.waypoints[this.waypointIndex].x, this.waypoints[this.waypointIndex].y);
+                                hero.moveTo(this.waypoints[this.waypointIndex].x, this.waypoints[this.waypointIndex].y);
                             }
                         } else {
-                            this.hero.moveTo(wp.x, wp.y);
+                            hero.moveTo(wp.x, wp.y);
                         }
                     }
                 }
-            }
-        }
-
-        // Обновление кулдауна атаки
-        if (this.hero.attackCooldown > 0) {
-            this.hero.attackCooldown -= dt;
-        }
-
-        // Покупка предметов (как в старом AI)
-        // Можно добавить простую логику
-        if (this.hero.gold >= 1500) {
-            let i = new Item('sword', 'Crystalys', 1500, { damageBonus: 32, critChance: 0.3, critMultiplier: 1.6 });
-            if (this.hero.inventory.addItem(i)) {
-                this.hero.gold -= 1500;
-                audio.play('buy');
             }
         }
     }
@@ -2404,13 +2392,29 @@ class BotAI {
             }
         }
 
-        // Если строение в радиусе атаки или просто ближайшее, атакуем его
         if (closestBuilding && minDistBuilding <= attackRange) {
             return closestBuilding;
         }
 
-        // Если нет целей в радиусе, возвращаем null
         return null;
+    }
+
+    useAbilities(target) {
+        const hero = this.hero;
+        // Простая логика: если есть способность 0 и она готова, и цель в радиусе (для простоты используем 500)
+        for (let i = 0; i < hero.abilities.length; i++) {
+            const ab = hero.abilities[i];
+            if (ab.type === 'passive') continue;
+            if (ab.currentCooldown > 0) continue;
+            if (hero.mp < ab.manaCost) continue;
+            // Проверяем дальность (приблизительно)
+            const dist = Math.hypot(hero.x - target.x, hero.y - target.y);
+            if (dist <= 500) {
+                // Используем способность
+                hero.useAbility(i);
+                return;
+            }
+        }
     }
 }
 
@@ -2557,7 +2561,6 @@ class UIManager {
         const mCanvas = document.getElementById('minimapCanvas'); const mCtx = mCanvas.getContext('2d');
         if (!mCanvas) return;
         mCtx.clearRect(0,0,150,150); mCtx.fillStyle = '#151c12'; mCtx.fillRect(0,0,150,150);
-        // Рисуем линии (примерно)
         const lanes = ['top', 'mid', 'bottom'];
         for (let lane of lanes) {
             const wps = game.map.waypoints[lane];
@@ -2586,24 +2589,16 @@ class UIManager {
         drawDots(game.creeps.filter(c => c.team==='dire'), '#8b008b', 1.5);
         if (!game.playerHero.isDead) drawDots([game.playerHero], '#00ffff', 4);
         if (!game.enemyHero.isDead) drawDots([game.enemyHero], '#ff00ff', 4);
-        // Бараки
+        for (let bot of game.alliedBots) {
+            if (!bot.isDead) { const pos = toM(bot.x, bot.y); mCtx.fillStyle = '#00ddff'; mCtx.beginPath(); mCtx.arc(pos.x, pos.y, 2, 0, Math.PI*2); mCtx.fill(); }
+        }
+        for (let bot of game.enemyBots) {
+            if (!bot.isDead) { const pos = toM(bot.x, bot.y); mCtx.fillStyle = '#ff44aa'; mCtx.beginPath(); mCtx.arc(pos.x, pos.y, 2, 0, Math.PI*2); mCtx.fill(); }
+        }
         for (let b of game.barracks) {
             if (b.isDead) continue;
             const pos = toM(b.x, b.y);
             mCtx.fillStyle = b.team === 'radiant' ? '#66ff66' : '#ff6666';
-            mCtx.beginPath(); mCtx.arc(pos.x, pos.y, 2, 0, Math.PI*2); mCtx.fill();
-        }
-        // Боты
-        for (let bot of game.alliedBots) {
-            if (bot.isDead) continue;
-            const pos = toM(bot.x, bot.y);
-            mCtx.fillStyle = '#00ddff';
-            mCtx.beginPath(); mCtx.arc(pos.x, pos.y, 2, 0, Math.PI*2); mCtx.fill();
-        }
-        for (let bot of game.enemyBots) {
-            if (bot.isDead) continue;
-            const pos = toM(bot.x, bot.y);
-            mCtx.fillStyle = '#ff44aa';
             mCtx.beginPath(); mCtx.arc(pos.x, pos.y, 2, 0, Math.PI*2); mCtx.fill();
         }
     }
@@ -2619,8 +2614,8 @@ class Game {
         this.uiManager = new UIManager();
         this.playerHero = null; 
         this.enemyHero = null; 
-        this.alliedBots = []; // союзные боты
-        this.enemyBots = [];  // вражеские боты
+        this.alliedBots = [];
+        this.enemyBots = [];
         this.creeps = []; 
         this.towers = []; 
         this.barracks = [];
@@ -2632,7 +2627,7 @@ class Game {
         this.matchTime = 0; 
         this.creepTimer = 0; 
         this.lastTime = performance.now();
-        this.globalSpeedMultiplier = 0.1; 
+        this.globalSpeedMultiplier = 0.75; 
         this.glyphCooldown = { radiant: 0, dire: 0 }; 
         this.glyphMaxCooldown = 60;
         this.glyphActive = { radiant: false, dire: false }; 
@@ -2648,15 +2643,25 @@ class Game {
         this.initInput();
     }
 
+    getAllHeroes() {
+        const heroes = [];
+        if (this.playerHero && !this.playerHero.isDead) heroes.push(this.playerHero);
+        for (let bot of this.alliedBots) {
+            if (!bot.isDead) heroes.push(bot);
+        }
+        if (this.enemyHero && !this.enemyHero.isDead) heroes.push(this.enemyHero);
+        for (let bot of this.enemyBots) {
+            if (!bot.isDead) heroes.push(bot);
+        }
+        return heroes;
+    }
+
     initWorld() {
-        // Троны
         this.ancients.push(new Ancient(this.map.radiantBase.x, this.map.radiantBase.y, 'radiant'));
         this.ancients.push(new Ancient(this.map.direBase.x, this.map.direBase.y, 'dire'));
-        // Фонтаны
         this.fountains.push(new Fountain(this.map.radiantBase.x - 100, this.map.radiantBase.y + 100, 'radiant'));
         this.fountains.push(new Fountain(this.map.direBase.x + 100, this.map.direBase.y - 100, 'dire'));
 
-        // Координаты башен (T1, T2, T3) для каждой линии
         const laneData = {
             top: {
                 towers: {
@@ -2718,12 +2723,9 @@ class Game {
         audio.init();
         this.playerHero = this.createHero(selectedHeroName, this.map.radiantBase.x, this.map.radiantBase.y, 'radiant');
         const pool = ['Morphling', 'Warlock', 'Sniper', 'Bristleback', 'Huskar'];
-        // Враг на мид
         this.enemyHero = this.createHero(pool[Math.floor(Math.random() * pool.length)], this.map.direBase.x, this.map.direBase.y, 'dire');
-        // Создаём AI для врага
         this.enemyHero.ai = new BotAI(this.enemyHero, 'mid', this);
 
-        // Создаём союзных ботов: 2 на Top, 2 на Bottom
         const alliedLanes = ['top', 'bottom'];
         for (let lane of alliedLanes) {
             for (let i = 0; i < 2; i++) {
@@ -2736,7 +2738,6 @@ class Game {
             }
         }
 
-        // Создаём вражеских ботов: 2 на Top, 2 на Bottom
         for (let lane of alliedLanes) {
             for (let i = 0; i < 2; i++) {
                 const name = pool[Math.floor(Math.random() * pool.length)];
@@ -2905,7 +2906,7 @@ class Game {
 
     buyItem(type) {
         let p = this.playerHero; let it = null;
-        if (type === 'boots') it = new Item('boots', 'Boots of Speed', 500, { speedBonus: 40 });
+        if (type === 'boots') it = new Item('boots', 'Boots of Speed', 500, { speedBonus: 30 });
         if (type === 'sword') it = new Item('sword', 'Crystalys', 1500, { damageBonus: 32, critChance: 0.3, critMultiplier: 1.6 });
         if (type === 'vitality') it = new Item('vitality', 'Vitality Booster', 1000, { hp: 250 });
         if (type === 'ringhealth') it = new Item('ringhealth', 'Ring of Health', 400, { hpRegen: 4.5 });
@@ -2940,23 +2941,20 @@ class Game {
         }
         if (this.creepTimer >= 30 || this.matchTime === dt) { this.spawnWave(); this.creepTimer = 0; }
 
-        // Обновление героев
+        // Обновление героев и ботов
         this.playerHero.update(dt);
         this.enemyHero.update(dt);
         if (this.enemyHero.ai) this.enemyHero.ai.update(dt);
 
-        // Обновление союзных ботов
         for (let bot of this.alliedBots) {
             bot.update(dt);
             if (bot.ai) bot.ai.update(dt);
         }
-        // Обновление вражеских ботов
         for (let bot of this.enemyBots) {
             bot.update(dt);
             if (bot.ai) bot.ai.update(dt);
         }
 
-        // Обновление крипов
         for (let i = this.creeps.length - 1; i >= 0; i--) {
             if (this.creeps[i].isDead) this.creeps.splice(i, 1);
             else this.creeps[i].update(dt);
@@ -2996,7 +2994,6 @@ class Game {
         for (let a of this.ancients) a.draw(ctx, this.camera);
         for (let c of this.creeps) c.draw(ctx, this.camera);
 
-        // Отрисовка героев
         this.playerHero.draw(ctx, this.camera);
         this.enemyHero.draw(ctx, this.camera);
         for (let bot of this.alliedBots) bot.draw(ctx, this.camera);
