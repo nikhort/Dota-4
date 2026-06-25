@@ -607,7 +607,7 @@ class Hero extends Entity {
     constructor(x, y, team, name) {
         super(x, y, team, 22, 600, 54, 275);
         this.name = name; this.level = 1; this.xp = 0; this.maxXp = 100;
-        this.mp = 300; this.maxMp = 300; this.gold = 5000; 
+        this.mp = 300; this.maxMp = 300; this.gold = 300; 
         this.inventory = new Inventory(this); this.abilities = [];
         this.hpRegenBase = 2.0; this.mpRegenBase = 1.5; this.invulnerable = false;
         this.inventoryHpRegen = 0; this.inventoryManaRegen = 0;
