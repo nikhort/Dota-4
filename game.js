@@ -614,7 +614,16 @@ class Hero extends Entity {
         this.isHealingAtFountain = false;
         this.radianceTimer = 0; // для ауры Radiance
         this.passiveGoldTimer = 0; // для накопления золота
+
+        // --- Телепорт ---
+        this.teleportCharges = 0; // получает заряд только после смерти
+        this.isChannelingTeleport = false;
+        this.teleportTarget = null; // ссылка на башню (Tower)
+        this.teleportChannelTimer = 0;
+        this.teleportStartX = 0;
+        this.teleportStartY = 0;
     }
+
     getHpRegen() {
         let regen = this.hpRegenBase + (this.inventoryHpRegen || 0);
         // Пассивка Heart of Tarrasque: Behemoth's Blood
@@ -630,21 +639,119 @@ class Hero extends Entity {
     getMpRegen() {
         return this.mpRegenBase + (this.mpRegenAura || 0) + (this.inventoryManaRegen || 0);
     }
+
+    startTeleport(tower) {
+        if (this.isDead) return false;
+        if (this.teleportCharges <= 0) return false;
+        if (!tower || tower.isDead || tower.team !== this.team) return false;
+        // Отменить предыдущий канал, если был
+        this.cancelTeleport('new');
+        this.isChannelingTeleport = true;
+        this.teleportTarget = tower;
+        this.teleportChannelTimer = 5.0;
+        this.teleportStartX = this.x;
+        this.teleportStartY = this.y;
+        // Остановить движение и атаку
+        this.attackTarget = null;
+        this.targetX = this.x;
+        this.targetY = this.y;
+        this.isMovingToWaypoint = false;
+        // Уведомление
+        if (game && game.uiManager) {
+            game.uiManager.addFloatingText(this.x, this.y - 40, '📡 Teleporting...', '#7dd3fc');
+        }
+        return true;
+    }
+
+    cancelTeleport(reason = '') {
+        if (!this.isChannelingTeleport) return;
+        this.isChannelingTeleport = false;
+        this.teleportTarget = null;
+        this.teleportChannelTimer = 0;
+        if (game && game.uiManager) {
+            if (reason === 'move') {
+                game.uiManager.addFloatingText(this.x, this.y - 40, '❌ Teleport cancelled (moved)', '#ff6666');
+            } else if (reason === 'ability') {
+                game.uiManager.addFloatingText(this.x, this.y - 40, '❌ Teleport cancelled (ability used)', '#ff6666');
+            } else if (reason === 'death') {
+                // не показываем, т.к. герой умер
+            } else if (reason === 'new') {
+                // новый телепорт начался, старый отменён
+            } else {
+                game.uiManager.addFloatingText(this.x, this.y - 40, '❌ Teleport cancelled', '#ff6666');
+            }
+        }
+    }
+
+    updateTeleport(dt) {
+        if (!this.isChannelingTeleport) return;
+        if (this.isDead) {
+            this.cancelTeleport('death');
+            return;
+        }
+        // Проверка движения
+        const distMoved = Math.hypot(this.x - this.teleportStartX, this.y - this.teleportStartY);
+        if (distMoved > 5) {
+            this.cancelTeleport('move');
+            return;
+        }
+        // Проверка цели
+        if (!this.teleportTarget || this.teleportTarget.isDead || this.teleportTarget.team !== this.team) {
+            this.cancelTeleport('target lost');
+            return;
+        }
+        this.teleportChannelTimer -= dt;
+        if (this.teleportChannelTimer <= 0) {
+            // Телепорт завершён
+            this.finishTeleport();
+        }
+    }
+
+    finishTeleport() {
+        if (!this.isChannelingTeleport) return;
+        const tower = this.teleportTarget;
+        if (!tower || tower.isDead) {
+            this.cancelTeleport('target lost');
+            return;
+        }
+        // Переносим героя рядом с башней
+        const angle = Math.random() * Math.PI * 2;
+        const distance = 50 + this.radius + tower.radius;
+        const tx = tower.x + Math.cos(angle) * distance;
+        const ty = tower.y + Math.sin(angle) * distance;
+        this.x = Math.max(0, Math.min(8000, tx));
+        this.y = Math.max(0, Math.min(6000, ty));
+        this.targetX = this.x;
+        this.targetY = this.y;
+        // Убираем заряд
+        this.teleportCharges = Math.max(0, this.teleportCharges - 1);
+        // Сбрасываем состояние
+        this.isChannelingTeleport = false;
+        this.teleportTarget = null;
+        this.teleportChannelTimer = 0;
+        if (game && game.uiManager) {
+            game.uiManager.addFloatingText(this.x, this.y - 30, '✅ Teleported!', '#7dd3fc');
+        }
+        // Визуальный эффект
+        if (game) {
+            game.effects.push({ type: 'teleport_arrive', x: this.x, y: this.y, life: 0.5, radius: 40, team: this.team });
+        }
+    }
+
     onDeath(attacker) {
         audio.play('defeat');
 
         if (attacker instanceof Hero) {
             attacker.gold += 300;
-
             if (attacker === game.playerHero) {
-                game.uiManager.addFloatingText(
-                    this.x,
-                    this.y - 30,
-                    "+300 🪙 HERO KILL",
-                    "#ffd700"
-                );
+                game.uiManager.addFloatingText(this.x, this.y - 30, "+300 🪙 HERO KILL", "#ffd700");
             }
         }
+
+        // --- ДАЁМ ТЕЛЕПОРТ ПОСЛЕ СМЕРТИ (1 заряд) ---
+        this.teleportCharges = Math.min(1, this.teleportCharges + 1);
+        // Отменить канал, если был
+        this.cancelTeleport('death');
 
         setTimeout(() => {
             this.isDead = false; this.hp = this.maxHp; this.mp = this.maxMp;
@@ -663,6 +770,7 @@ class Hero extends Entity {
             }
         }, 5000);
     }
+
     addXp(amount) {
         if (this.level >= 10) return;
         this.xp += amount;
@@ -671,17 +779,19 @@ class Hero extends Entity {
             this.maxHp += 80; this.hp += 80;
             if (this.maxMp > 0) { this.maxMp += 40; this.mp += 40; }
             this.damage += 5;
-
             if (this.hpRegenBase === undefined) this.hpRegenBase = 2.0;
             if (this.mpRegenBase === undefined) this.mpRegenBase = 1.5;
             this.hpRegenBase += 0.5;
             if (this.maxMp > 0) this.mpRegenBase += 0.25;
-
             game.uiManager.addFloatingText(this.x, this.y - 35, "LEVEL UP", '#ffd700');
         }
     }
+
     update(dt) {
         if (this.isDead) return;
+        // Обновляем телепорт (канал) до всего остального, чтобы прервать при необходимости
+        this.updateTeleport(dt);
+
         this.updateBuffs(dt);
         if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.getHpRegen() * dt);
         if (this.maxMp > 0 && this.mp < this.maxMp) this.mp = Math.min(this.maxMp, this.mp + this.getMpRegen() * dt);
@@ -755,6 +865,10 @@ class Hero extends Entity {
         return false;
     }
     performAttack() {
+        if (this.isChannelingTeleport) {
+            this.cancelTeleport('ability');
+            return;
+        }
         // Проверка промаха от Radiance у цели
         if (this.attackTarget && this.attackTarget.inventory) {
             const radianceItem = this.attackTarget.inventory.items.find(item => item.id === 'radiance');
@@ -787,6 +901,29 @@ class Hero extends Entity {
         }
         game.projectiles.push(proj);
     }
+
+    drawTeleportBar(ctx, camera) {
+        if (!this.isChannelingTeleport) return;
+        const sx = this.x - camera.x;
+        const sy = this.y - camera.y - this.radius - 20;
+        const barWidth = 60;
+        const barHeight = 6;
+        const progress = Math.max(0, this.teleportChannelTimer / 5.0);
+        ctx.save();
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(sx - barWidth/2 - 1, sy - 1, barWidth + 2, barHeight + 2);
+        ctx.fillStyle = '#7dd3fc';
+        ctx.fillRect(sx - barWidth/2, sy, barWidth * (1 - progress), barHeight);
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(sx - barWidth/2, sy, barWidth, barHeight);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '8px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(Math.ceil(this.teleportChannelTimer) + 's', sx, sy - 4);
+        ctx.restore();
+    }
+
     draw(ctx, camera) {
         if (this.isDead) return;
         this.drawShadow(ctx, camera);
@@ -807,6 +944,7 @@ class Hero extends Entity {
             ctx.restore();
         }
         this.drawHealthBar(ctx, camera);
+        this.drawTeleportBar(ctx, camera);
     }
 }
 
@@ -832,6 +970,7 @@ class Morphling extends Hero {
 
     useAbility(idx = 0) {
         if (this.isDead || this.silenceTimer > 0) return;
+        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); }
 
         if (idx === 0) {
             if (this.abilities[0].trigger(this)) {
@@ -1014,6 +1153,7 @@ class Warlock extends Hero {
     
     useAbility(idx) {
         if (this.isDead || this.silenceTimer > 0) return;
+        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); }
         
         if (this.isChannelingUpheaval && idx === 2) {
             this.isChannelingUpheaval = false;
@@ -1361,6 +1501,7 @@ class Bristleback extends Hero {
 
     useAbility(idx) {
         if (this.isDead || this.silenceTimer > 0) return;
+        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); }
 
         if (idx === 0) {
             const ab = this.abilities[0];
@@ -1403,6 +1544,7 @@ class Bristleback extends Hero {
     }
 
     performAttack() {
+        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
         this.attackCooldown = this.attackSpeed;
         audio.play('attack');
         let finalDamage = this.damage + this.getWarpathDamageBonus();
@@ -1459,8 +1601,10 @@ class Sniper extends Hero {
         this.shrapnelChargeRegenTimer = 0;
         this.shrapnelChargeCooldown = 15;
     }
+
     useAbility(idx) {
         if (this.isDead || this.silenceTimer > 0) return;
+        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); }
         if (idx === 0) { 
             let ab = this.abilities[0];
             if (this.shrapnelCharges > 0 && this.mp >= ab.manaCost) {
@@ -1485,6 +1629,7 @@ class Sniper extends Hero {
             if (t && this.abilities[3].trigger(this)) { this.assTarget = t; this.assChannel = 1.5; }
         }
     }
+
     update(dt) {
         if (this.shrapnelCharges < this.maxShrapnelCharges) {
             this.shrapnelChargeRegenTimer += dt;
@@ -1516,8 +1661,10 @@ class Sniper extends Hero {
             }
         }
     }
+
     performAttack() {
         if (this.assChannel > 0) return;
+        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
         this.attackCooldown = this.attackSpeed; audio.play('attack');
         
         let hsChance = this.aimTimer > 0 ? 0.60 : 0.30;
@@ -1529,6 +1676,7 @@ class Sniper extends Hero {
         if (isHs) p.isHs = true;
         game.projectiles.push(p);
     }
+
     draw(ctx, camera) {
         super.draw(ctx, camera);
         if (this.isDead) return;
@@ -1565,6 +1713,7 @@ class Huskar extends Hero {
 
     useAbility(idx) {
         if (this.isDead || this.silenceTimer > 0) return;
+        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); }
 
         if (idx === 0 && this.abilities[0].currentCooldown <= 0 && this.hp > 75) {
             this.hp -= 75;
@@ -1643,6 +1792,7 @@ class Huskar extends Hero {
     }
 
     performAttack() {
+        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
         this.attackCooldown = this.attackSpeed; audio.play('attack');
         let finalDamage = this.damage;
         if (this.vladmirAura) finalDamage *= 1.18;
@@ -1663,24 +1813,18 @@ class Huskar extends Hero {
     }
 }
 
-// ----------------------------------------------
-// НОВЫЙ ГЕРОЙ: Anti-Mage
-// ----------------------------------------------
 class AntiMage extends Hero {
     constructor(x, y, team) {
         super(x, y, team, 'Anti-Mage');
-        // Ближний бой, повышенные характеристики
         this.maxHp = 800;
         this.hp = 800;
         this.damage = 58;
         this.baseSpeed = 260;
         this.speed = 260;
-        this.attackRange = 100; // ближний бой
+        this.attackRange = 100;
         this.attackSpeed = 1.2;
-        // Мана
         this.maxMp = 300;
         this.mp = 300;
-        // Пассивное сопротивление магии от Counterspell
         this.magicResistance = 0.14;
 
         this.abilities = [
@@ -1691,8 +1835,8 @@ class AntiMage extends Hero {
         ];
     }
 
-    // Переопределяем performAttack для Mana Break
     performAttack() {
+        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
         this.attackCooldown = this.attackSpeed;
         audio.play('attack');
         let finalDamage = this.damage;
@@ -1705,9 +1849,8 @@ class AntiMage extends Hero {
             if (item.stats?.critMultiplier) critMultiplier = Math.max(critMultiplier, item.stats.critMultiplier);
         }
 
-        // Создаём снаряд с пометкой manaBreak
         let proj = new Projectile(this.x, this.y, this.attackTarget, finalDamage, this.team, this);
-        proj.isManaBreak = true; // специальный флаг для Anti-Mage
+        proj.isManaBreak = true;
         if (Math.random() < critChance) {
             proj.isCrit = true;
             proj.damage = Math.max(1, proj.damage * critMultiplier);
@@ -1717,11 +1860,11 @@ class AntiMage extends Hero {
 
     useAbility(idx) {
         if (this.isDead || this.silenceTimer > 0) return;
+        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); }
 
-        if (idx === 1) { // Blink
+        if (idx === 1) {
             const ab = this.abilities[1];
             if (!ab.trigger(this)) return;
-            // Перемещаем на 600 в направлении цели или в сторону мыши (упрощённо - к цели атаки или вперёд)
             let targetX = this.targetX;
             let targetY = this.targetY;
             if (this.attackTarget) {
@@ -1735,15 +1878,12 @@ class AntiMage extends Hero {
                 let step = 600 / dist;
                 let newX = this.x + dx * step;
                 let newY = this.y + dy * step;
-                // Ограничение картой
                 newX = Math.max(0, Math.min(8000, newX));
                 newY = Math.max(0, Math.min(6000, newY));
                 this.x = newX;
                 this.y = newY;
-                // Обновляем цели движения
                 this.targetX = newX;
                 this.targetY = newY;
-                // Визуальный эффект (можно добавить вспышку)
                 if (game) {
                     game.effects.push({
                         type: 'blink',
@@ -1755,12 +1895,11 @@ class AntiMage extends Hero {
                     });
                 }
             }
-        } else if (idx === 2) { // Counterspell (активный)
+        } else if (idx === 2) {
             const ab = this.abilities[2];
             if (!ab.trigger(this)) return;
             this.counterspellActive = true;
             this.counterspellTimer = 1.3;
-            // Визуальный эффект
             if (game) {
                 game.effects.push({
                     type: 'counterspell_shield',
@@ -1771,27 +1910,22 @@ class AntiMage extends Hero {
                     team: this.team
                 });
             }
-        } else if (idx === 3) { // Mana Void
+        } else if (idx === 3) {
             const ab = this.abilities[3];
             if (!ab.trigger(this)) return;
-            // Находим цель
             let target = this.attackTarget;
             if (!target || target.isDead || target.team === this.team) {
                 const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
                 target = enemies.find(e => Math.hypot(e.x - this.x, e.y - this.y) < 600);
             }
             if (!target || target.isDead) return;
-            // Вычисляем недостающую ману (учитываем, что мана может быть 0)
             let missingMana = Math.max(0, (target.maxMp || 0) - (target.mp || 0));
-            // Урон = недостающая мана * 1 (но для баланса можно ограничить)
             let damage = missingMana * 1;
-            // Применяем урон к цели и всем врагам в радиусе 350
             const radius = 350;
             const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
             for (let e of enemies) {
                 if (e.isDead) continue;
                 if (e === target || Math.hypot(e.x - target.x, e.y - target.y) <= radius) {
-                    // Оглушаем цель (и только её?) - по описанию цель оглушается, остальные получают урон
                     if (e === target) {
                         e.stunned = true;
                         e.stunTimer = Math.max(e.stunTimer || 0, 0.3);
@@ -1799,7 +1933,6 @@ class AntiMage extends Hero {
                     e.takeDamage(damage, this, false, 'magic');
                 }
             }
-            // Визуальный эффект взрыва
             if (game) {
                 game.effects.push({
                     type: 'mana_void',
@@ -1816,7 +1949,6 @@ class AntiMage extends Hero {
     draw(ctx, camera) {
         super.draw(ctx, camera);
         if (this.isDead) return;
-        // Если активен Counterspell, рисуем щит
         if (this.counterspellActive) {
             let sx = this.x - camera.x;
             let sy = this.y - camera.y;
@@ -1831,9 +1963,10 @@ class AntiMage extends Hero {
     }
 }
 
-// ----------------------------------------------
-// ВСПОМОГАТЕЛЬНЫЕ КЛАССЫ
-// ----------------------------------------------
+// =========================================================================
+//  ВСПОМОГАТЕЛЬНЫЕ КЛАССЫ
+// =========================================================================
+
 class ShrapnelZone {
     constructor(x, y, team, caster) {
         this.x = x; this.y = y; this.team = team; this.caster = caster;
@@ -1876,7 +2009,6 @@ class ShrapnelZone {
     }
 }
 
-// Крип с поддержкой линии и waypoints
 class Creep extends Entity {
     constructor(x, y, team, type, lane) {
         let hp = type === 'melee' ? 320 : 230;
@@ -1890,13 +2022,11 @@ class Creep extends Entity {
         const map = game.map;
         const waypoints = (this.team === 'radiant') ? map.waypoints[lane] : map.waypointsReverse[lane];
         this.setWaypoints(waypoints);
-        // Для отслеживания цели
         this._targetCheckTimer = 0;
     }
 
     takeDamage(amount, attacker, isFb = false, damageType = 'physical') {
         if (this.isDead) return;
-
         const actualAttacker = attacker && !(attacker instanceof Entity) && attacker.attacker instanceof Entity
             ? attacker.attacker
             : attacker;
@@ -1916,10 +2046,8 @@ class Creep extends Entity {
         return Math.hypot(dx, dy) <= clickHitboxRadius;
     }
 
-    // Поиск цели по приоритету, только в пределах атаки
     findTarget() {
         const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
-        // Ищем врага в радиусе атаки (с небольшим запасом)
         const searchRadius = this.attackRange * 1.5;
         let best = null;
         let bestDist = Infinity;
@@ -1928,12 +2056,11 @@ class Creep extends Entity {
             if (!e.isAttackable()) continue;
             const d = Math.hypot(e.x - this.x, e.y - this.y);
             if (d <= searchRadius && d < bestDist) {
-                // Приоритет: если враг в радиусе атаки, то он главный
                 best = e;
                 bestDist = d;
             }
         }
-        return best; // вернёт врага, если есть в радиусе, иначе null
+        return best;
     }
 
     update(dt) {
@@ -1945,7 +2072,6 @@ class Creep extends Entity {
         if (this.lifeBreakSlowTimer > 0) rate *= 0.4;
         if (this.attackCooldown > 0) this.attackCooldown -= dt * rate;
 
-        // Обновляем цель каждые 0.5 сек или если текущая цель мертва / недоступна
         this._targetCheckTimer += dt;
         if (this._targetCheckTimer > 0.5 || !this.attackTarget || !this.attackTarget.isAttackable() || this.attackTarget.team === this.team) {
             this._targetCheckTimer = 0;
@@ -1954,8 +2080,6 @@ class Creep extends Entity {
                 this.attackTarget = newTarget;
             } else {
                 this.attackTarget = null;
-                // Если нет цели в радиусе, продолжаем движение по waypoints
-                // Убедимся, что isMovingToWaypoint активно
                 if (this.waypoints && this.waypoints.length > 0) {
                     this.isMovingToWaypoint = true;
                     if (this.currentWaypointIndex >= this.waypoints.length) {
@@ -1967,7 +2091,6 @@ class Creep extends Entity {
             }
         }
 
-        // Если есть цель и она в радиусе, атакуем
         if (this.attackTarget && this.attackTarget.isAttackable() && !this.attackTarget.isDead) {
             let d = Math.hypot(this.attackTarget.x - this.x, this.attackTarget.y - this.y);
             if (d <= this.attackRange && this.attackCooldown <= 0) {
@@ -1987,7 +2110,6 @@ class Creep extends Entity {
             }
         }
 
-        // Движение (включая waypoints)
         this.updateMovement(dt);
     }
 
@@ -2000,7 +2122,6 @@ class Creep extends Entity {
                 game.uiManager.addFloatingText(this.x, this.y - 15, `+${b} 🪙`, '#ffd700');
             }
         }
-        // Раздаём опыт всем героям в радиусе
         const allHeroes = game.getAllHeroes();
         for (let h of allHeroes) {
             if (h.isDead) continue;
@@ -2081,7 +2202,6 @@ class Catapult extends Entity {
         this._targetCheckTimer = 0;
     }
 
-    // Поиск цели аналогично крипу, только с радиусом атаки
     findTarget() {
         const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
         const searchRadius = this.attackRange * 1.5;
@@ -2180,7 +2300,6 @@ class Catapult extends Entity {
     }
 }
 
-// --- ИЗМЕНЕННЫЙ КЛАСС TOWER (исправлена логика агро) ---
 class Tower extends Entity {
     constructor(x, y, team, tier) {
         super(x, y, team, 32, 4500, 85, 0);
@@ -2189,12 +2308,10 @@ class Tower extends Entity {
         this.glyphActive = false;
         this.glyphTimer = 0;
         this.tier = tier;
-        this.lane = ''; // будет установлено извне
-        // Список героев, которые заагрили башню (атаковали союзного героя)
+        this.lane = '';
         this.aggroSet = new Set();
     }
 
-    // Добавить героя в список агро
     addAggro(hero) {
         if (hero && hero.team !== this.team && !hero.isDead) {
             this.aggroSet.add(hero);
@@ -2217,7 +2334,6 @@ class Tower extends Entity {
         }
         if (this.attackCooldown > 0) this.attackCooldown -= dt;
 
-        // Собираем всех врагов в радиусе
         const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
         const inRange = enemies.filter(e => {
             if (e.isDead || !e.isAttackable()) return false;
@@ -2225,7 +2341,6 @@ class Tower extends Entity {
             return dist <= this.attackRange;
         });
 
-        // 1. Поиск агрессивного героя (кто атаковал союзного героя)
         let aggroTarget = null;
         for (let h of this.aggroSet) {
             if (h.isDead || h.team === this.team) continue;
@@ -2236,11 +2351,9 @@ class Tower extends Entity {
             }
         }
 
-        // Если есть агрессивный герой в радиусе, атакуем его
         if (aggroTarget) {
             this.attackTarget = aggroTarget;
         } else {
-            // 2. Ищем крипов (приоритет перед обычными героями)
             let creepTarget = null;
             for (let e of inRange) {
                 if (e instanceof Creep) {
@@ -2251,22 +2364,16 @@ class Tower extends Entity {
             if (creepTarget) {
                 this.attackTarget = creepTarget;
             } else {
-                // 3. Любой другой враг (герой или строение)
                 this.attackTarget = inRange.length > 0 ? inRange[0] : null;
             }
         }
 
-        // Если цель есть и кулдаун атаки готов, атакуем
         if (this.attackTarget && this.attackCooldown <= 0) {
             this.attackCooldown = this.attackSpeed;
             game.projectiles.push(new Projectile(this.x, this.y - 40, this.attackTarget, this.damage, this.team, this));
         }
 
-        // Очистка aggroSet от мёртвых или вышедших из радиуса (делается при следующем апдейте)
-        // Можно также удалять через некоторое время, но достаточно проверки при выборе цели
-        // Однако если герой вышел из радиуса, но всё ещё в aggroSet, он не будет выбран, т.к. проверка на дистанцию.
-        // Но чтобы Set не разрастался, периодически чистим
-        if (Math.random() < 0.01) { // раз в ~100 кадров
+        if (Math.random() < 0.01) {
             const toRemove = [];
             for (let h of this.aggroSet) {
                 if (h.isDead || h.team === this.team || Math.hypot(h.x - this.x, h.y - this.y) > this.attackRange * 1.5) {
@@ -2351,29 +2458,23 @@ class Fountain {
     }
 }
 
-// Модифицированный Projectile с поддержкой Mana Break и Counterspell отражения
 class Projectile {
     constructor(x, y, target, damage, team, attacker) {
         this.x = x; this.y = y; this.target = target; this.damage = damage; this.team = team; this.attacker = attacker;
         this.speed = 500; this.radius = 5; this.isHs = false; this.isAss = false;
         this.isCrit = false; this.isBurningSpear = false;
-        this.isManaBreak = false; // для Anti-Mage
-        this.reflected = false;   // для Counterspell
+        this.isManaBreak = false;
+        this.reflected = false;
     }
 
     reflect() {
-        // Отражение снаряда обратно на атакующего
         if (this.reflected) return;
         const originalTarget = this.target;
         if (!this.attacker) return;
-        // Меняем цель на того, кто выпустил снаряд (если это живой враг)
         if (this.attacker.isDead) return;
-        // Меняем направление: цель = атакующий
         this.target = this.attacker;
-        // Меняем команду на противоположную, чтобы не считать своим
         this.team = this.attacker.team === 'radiant' ? 'dire' : 'radiant';
         this.reflected = true;
-        // Добавляем визуальный эффект (можно через game.effects)
         if (game) {
             game.effects.push({
                 type: 'reflect',
@@ -2388,36 +2489,27 @@ class Projectile {
 
     update(dt) {
         if (!this.target || this.target.isDead) return true;
-        // Проверка на отражение: если цель имеет активный Counterspell и снаряд не отражён, отражаем
         if (this.target.counterspellActive && !this.reflected) {
             this.reflect();
-            return false; // продолжаем лететь
+            return false;
         }
         let dx = this.target.x - this.x;
         let dy = this.target.y - this.y;
         let dist = Math.hypot(dx, dy);
         if (dist < 12) {
-            // Попадание в цель
-            // Mana Break (для Anti-Mage)
             if (this.isManaBreak && this.attacker instanceof AntiMage) {
                 const target = this.target;
-                // Сжигаем ману и наносим доп. урон
                 if (target.maxMp > 0) {
                     const burnAmount = Math.min(25, target.mp);
                     if (burnAmount > 0) {
                         target.mp -= burnAmount;
-                        // Доп. урон равен сожжённой мане (физический)
                         const bonusDamage = burnAmount;
-                        // Добавляем бонусный урон к основному (но он уже рассчитан как обычный)
-                        // Мы добавим его как отдельный урон через takeDamage
                         target.takeDamage(bonusDamage, this.attacker, false, 'physical');
-                        // Отображаем эффект
                         game.uiManager.addFloatingText(target.x, target.y - 30, `-${burnAmount} mana`, '#66ccff');
                     }
                 }
             }
 
-            // Обычный урон
             if (this.isHs) {
                 this.target.slowTimer = 1.5;
                 this.target.headshotSlowTimer = 1.5;
@@ -2443,9 +2535,7 @@ class Projectile {
                 if (!this.target.burningSpears) this.target.burningSpears = [];
                 this.target.burningSpears.push({ duration: 9.0, tickTimer: 0, attacker: this.attacker });
             }
-            // Наносим основной урон (уже с учётом крита и т.д.)
             this.target.takeDamage(this.damage, this.attacker);
-            // Вампиризм
             try {
                 const attacker = this.attacker;
                 if (attacker && attacker.vladmirAura) {
@@ -2541,9 +2631,6 @@ class BountyRune {
     }
 }
 
-// ----------------------------------------------
-// БАРАКИ
-// ----------------------------------------------
 class Barracks {
     constructor(x, y, team, type, lane) {
         this.x = x;
@@ -2556,29 +2643,25 @@ class Barracks {
         this.hp = 1200;
         this.isDead = false;
         this.armor = 5;
-        this.t3Alive = true; // будет обновляться из игры
+        this.t3Alive = true;
     }
 
     isAttackable() {
         return !this.isDead && this.isVulnerable();
     }
 
-    // Проверка, можно ли атаковать (T3 должна быть мертва)
     isVulnerable() {
         if (this.isDead) return false;
-        // Находим соответствующую T3 для этой линии и команды
         const lane = this.lane;
         const team = this.team;
         const towers = game.towers;
-        // T3 имеет tier === 3, ищем башню с такой же линией и командой
         const t3 = towers.find(t => t.team === team && t.lane === lane && t.tier === 3 && !t.isDead);
-        return !t3; // если T3 нет в живых, то уязвим
+        return !t3;
     }
 
     takeDamage(amount, attacker) {
         if (this.isDead) return;
-        if (!this.isVulnerable()) return; // не уязвим, игнорируем урон
-
+        if (!this.isVulnerable()) return;
         let reduction = this.armor / (this.armor + 100);
         amount = Math.max(1, amount * (1 - reduction));
         this.hp -= amount;
@@ -2593,7 +2676,6 @@ class Barracks {
 
     draw(ctx, camera) {
         if (this.isDead) return;
-        // Проверяем уязвимость для отображения (прозрачность)
         const vulnerable = this.isVulnerable();
         const sx = this.x - camera.x;
         const sy = this.y - camera.y;
@@ -2610,13 +2692,11 @@ class Barracks {
         ctx.textBaseline = 'middle';
         ctx.fillText(this.type === 'melee' ? '⚔️' : '🏹', sx, sy);
         ctx.restore();
-        // HP bar
         const barW = 40, barH = 4;
         ctx.fillStyle = '#000';
         ctx.fillRect(sx - barW/2, sy - 22, barW, barH);
         ctx.fillStyle = this.team === 'radiant' ? '#33ff33' : '#ff3333';
         ctx.fillRect(sx - barW/2, sy - 22, barW * (this.hp/this.maxHp), barH);
-        // Если не уязвим, показываем замок
         if (!vulnerable) {
             ctx.fillStyle = '#ffaa00';
             ctx.font = '12px Arial';
@@ -2625,31 +2705,28 @@ class Barracks {
     }
 }
 
-// ----------------------------------------------
-// НОВЫЙ КЛАСС ИИ ДЛЯ БОТОВ (исправленный)
-// ----------------------------------------------
+// =========================================================================
+//  ИИ БОТОВ (с телепортом)
+// =========================================================================
+
 class BotAI {
     constructor(hero, lane, game) {
         this.hero = hero;
         this.lane = lane;
         this.game = game;
-        this.state = 'normal'; // 'normal', 'retreat', 'heal'
+        this.state = 'normal';
         this.fountain = hero.team === 'radiant' ? game.fountains[0] : game.fountains[1];
         this.waypoints = hero.team === 'radiant' ? game.map.waypoints[lane] : game.map.waypointsReverse[lane];
         this.waypointIndex = 0;
-        this.retreatThreshold = 0.10; // 10% hp
+        this.retreatThreshold = 0.10;
         this.abilityTimer = 0;
         this.blinkTimer = 0;
 
-        // --- ЭКОНОМИКА И БИЛД ---
         this.buildIndex = 0;
         this.buildTimer = 0;
-        // Определяем билд в зависимости от героя
         const name = hero.name;
         if (name === 'Huskar') {
-            // Vanguard (ringhealth + vitality) -> Heart (ringtarrasque + reaver)
             this.build = ['ringhealth', 'vitality', 'ringtarrasque', 'reaver'];
-            // Финальные предметы для проверки
             this.finalItems = ['vanguard', 'heart'];
         } else if (name === 'Anti-Mage') {
             this.build = ['radiance'];
@@ -2664,48 +2741,39 @@ class BotAI {
             this.build = ['radiance', 'ringtarrasque', 'reaver'];
             this.finalItems = ['radiance', 'heart'];
         } else {
-            // Для других героев (Bristleback) пустой билд
             this.build = [];
             this.finalItems = [];
         }
-        // Запоминаем текущий индекс в build для каждого финального предмета
-        // Простой подход: buildIndex - индекс в массиве build, но нужно знать, для какого финального предмета
-        // Мы будем покупать последовательно все компоненты в build, но проверять, не собран ли уже финальный предмет.
-        // Если финальный предмет собран, пропускаем его компоненты.
-        // Для этого используем currentFinalItemIndex
         this.currentFinalItemIndex = 0;
-        // Инициализируем начальное золото (можно 100)
         this.hero.gold = 100;
+        this._lastTeleportTime = 0;
     }
 
     update(dt) {
         const hero = this.hero;
         if (hero.isDead) return;
 
-        // --- Пассивное золото для ботов ---
         hero.passiveGoldTimer += dt;
         if (hero.passiveGoldTimer >= 1.0) {
             hero.passiveGoldTimer -= 1.0;
-            hero.gold += 2; // +2 золота в секунду для ботов
+            hero.gold += 2;
         }
 
-        // --- Покупка предметов ---
         this.buildTimer += dt;
-        if (this.buildTimer >= 1.0) { // проверяем каждую секунду
+        if (this.buildTimer >= 1.0) {
             this.buildTimer = 0;
             this.tryBuyItem();
         }
 
-        // --- Основная логика ИИ (движение, бой и т.д.) ---
-        // Проверяем состояние здоровья
-        const hpPercent = hero.hp / hero.maxHp;
+        if (this.shouldUseTeleport()) {
+            this.useTeleport();
+        }
 
-        // Переход в режим отступления
+        const hpPercent = hero.hp / hero.maxHp;
         if (hpPercent <= this.retreatThreshold && this.state !== 'heal') {
             this.state = 'retreat';
             hero.attackTarget = null;
             hero.moveTo(this.fountain.x, this.fountain.y);
-            // Если Anti-Mage и Blink доступен, используем для быстрого отступления
             if (hero instanceof AntiMage && hero.abilities[1].currentCooldown <= 0 && hero.mp >= 50) {
                 let dx = this.fountain.x - hero.x;
                 let dy = this.fountain.y - hero.y;
@@ -2729,7 +2797,6 @@ class BotAI {
             }
         }
 
-        // Если на базе и здоровье не полное, лечимся
         if (this.state === 'retreat' || this.state === 'heal') {
             const dist = Math.hypot(hero.x - this.fountain.x, hero.y - this.fountain.y);
             if (dist < this.fountain.radius) {
@@ -2747,7 +2814,6 @@ class BotAI {
             return;
         }
 
-        // В нормальном режиме выбираем цель и двигаемся
         if (this.state === 'normal') {
             const target = this.selectTarget();
             if (target) {
@@ -2790,54 +2856,81 @@ class BotAI {
         }
     }
 
-    // --- Методы покупки ---
+    shouldUseTeleport() {
+        const hero = this.hero;
+        if (hero.isDead) return false;
+        if (hero.teleportCharges <= 0) return false;
+        if (hero.isChannelingTeleport) return false;
+        if (this._lastTeleportTime > 0 && (Date.now() - this._lastTeleportTime) < 5000) return false;
+        if (this.waypoints && this.waypoints.length > 0) {
+            const nextWp = this.waypoints[Math.min(this.waypointIndex, this.waypoints.length - 1)];
+            if (nextWp && Math.hypot(hero.x - nextWp.x, hero.y - nextWp.y) < 300) {
+                return false;
+            }
+        }
+        if (this.state === 'retreat' || this.state === 'heal') return false;
+        if (hero.attackTarget && !hero.attackTarget.isDead) return false;
+        return true;
+    }
+
+    useTeleport() {
+        const hero = this.hero;
+        if (!hero || hero.isDead) return;
+        const lane = this.lane;
+        const teamTowers = game.towers.filter(t => t.team === hero.team && t.lane === lane && !t.isDead);
+        if (teamTowers.length === 0) return;
+        let base = hero.team === 'radiant' ? game.map.radiantBase : game.map.direBase;
+        let farthestTower = null;
+        let maxDist = -Infinity;
+        for (let t of teamTowers) {
+            const dist = Math.hypot(t.x - base.x, t.y - base.y);
+            if (dist > maxDist) {
+                maxDist = dist;
+                farthestTower = t;
+            }
+        }
+        if (!farthestTower) return;
+        if (hero.startTeleport(farthestTower)) {
+            this._lastTeleportTime = Date.now();
+            hero.attackTarget = null;
+            hero.targetX = hero.x;
+            hero.targetY = hero.y;
+            this.state = 'normal';
+        }
+    }
+
     tryBuyItem() {
         const hero = this.hero;
-        if (this.buildIndex >= this.build.length) return; // все предметы куплены
+        if (this.buildIndex >= this.build.length) return;
 
-        // Проверяем, не собран ли уже финальный предмет для текущего этапа
-        // Ищем текущий финальный предмет в инвентаре
         let currentFinalItemId = null;
         if (this.currentFinalItemIndex < this.finalItems.length) {
             currentFinalItemId = this.finalItems[this.currentFinalItemIndex];
         }
 
-        // Если финальный предмет уже есть в инвентаре, переходим к следующему
         if (currentFinalItemId) {
             const hasFinal = hero.inventory.items.find(item => item.id === currentFinalItemId);
             if (hasFinal) {
                 this.currentFinalItemIndex++;
-                // Если есть еще финальные предметы, продолжаем
-                if (this.currentFinalItemIndex < this.finalItems.length) {
-                    // Продолжаем
-                } else {
-                    // Все финальные предметы собраны, можно остановить покупки
-                    this.buildIndex = this.build.length; // завершить
+                if (this.currentFinalItemIndex >= this.finalItems.length) {
+                    this.buildIndex = this.build.length;
                 }
                 return;
             }
         }
 
-        // Если финальный предмет еще не собран, покупаем следующий компонент
         const itemId = this.build[this.buildIndex];
         const cost = this.getItemCost(itemId);
         if (hero.gold >= cost) {
-            // Проверяем, есть ли уже этот компонент в инвентаре (чтобы не покупать повторно)
             const hasItem = hero.inventory.items.find(item => item.id === itemId);
             if (hasItem) {
-                // Если уже есть, переходим к следующему компоненту
                 this.buildIndex++;
                 return;
             }
-            // Пытаемся купить
             const item = this.createItem(itemId);
             if (item && hero.inventory.addItem(item)) {
                 hero.gold -= cost;
                 audio.play('buy');
-                // После покупки проверяем, не собран ли финальный предмет
-                // Если собран, то buildIndex останется, но при следующем вызове мы обнаружим финальный предмет.
-            } else {
-                // Не удалось добавить (инвентарь полон) — не делаем ничего
             }
         }
     }
@@ -2857,7 +2950,6 @@ class BotAI {
     }
 
     createItem(itemId) {
-        // Возвращает новый Item по id
         const items = {
             'ringhealth': new Item('ringhealth', 'Ring of Health', 400, { hpRegen: 4.5 }),
             'vitality': new Item('vitality', 'Vitality Booster', 1000, { hp: 250 }),
@@ -2871,13 +2963,11 @@ class BotAI {
         return items[itemId] || null;
     }
 
-    // --- Остальные методы (selectTarget, useAbilities) без изменений ---
     selectTarget() {
         const hero = this.hero;
         const enemies = hero.team === 'radiant' ? this.game.direEntities() : this.game.radiantEntities();
         const attackRange = hero.attackRange * 1.2;
 
-        // 1. Вражеские герои (наивысший приоритет)
         let closestHero = null;
         let minDistHero = Infinity;
         for (let e of enemies) {
@@ -2891,7 +2981,6 @@ class BotAI {
         }
         if (closestHero) return closestHero;
 
-        // 2. Вражеские крипы
         let closestCreep = null;
         let minDistCreep = Infinity;
         for (let e of enemies) {
@@ -2905,7 +2994,6 @@ class BotAI {
         }
         if (closestCreep) return closestCreep;
 
-        // 3. Строения
         let closestBuilding = null;
         let minDistBuilding = Infinity;
         for (let t of this.game.towers) {
@@ -2973,9 +3061,10 @@ class BotAI {
     }
 }
 
-// ----------------------------------------------
-// UI Менеджер
-// ----------------------------------------------
+// =========================================================================
+//  UI Менеджер
+// =========================================================================
+
 class UIManager {
     constructor() { this.floatTexts = []; }
     addFloatingText(x, y, text, color) { this.floatTexts.push({ x, y, text, color, life: 1.0 }); }
@@ -3108,6 +3197,7 @@ class UIManager {
             }
         }
     }
+
     draw(ctx, camera) {
         ctx.save(); ctx.font = 'bold 14px Arial';
         for (let t of this.floatTexts) {
@@ -3115,10 +3205,16 @@ class UIManager {
         }
         ctx.restore(); this.drawMinimap();
     }
+
     drawMinimap() {
-        const mCanvas = document.getElementById('minimapCanvas'); const mCtx = mCanvas.getContext('2d');
+        const mCanvas = document.getElementById('minimapCanvas');
         if (!mCanvas) return;
-        mCtx.clearRect(0,0,150,150); mCtx.fillStyle = '#151c12'; mCtx.fillRect(0,0,150,150);
+        const mCtx = mCanvas.getContext('2d');
+        const w = mCanvas.width, h = mCanvas.height;
+        mCtx.clearRect(0, 0, w, h);
+        mCtx.fillStyle = '#151c12';
+        mCtx.fillRect(0, 0, w, h);
+
         const lanes = ['top', 'mid', 'bottom'];
         for (let lane of lanes) {
             const wps = game.map.waypoints[lane];
@@ -3127,31 +3223,77 @@ class UIManager {
             mCtx.lineWidth = 2;
             mCtx.beginPath();
             for (let wp of wps) {
-                const sx = (wp.x / 8000) * 150;
-                const sy = (wp.y / 6000) * 150;
-                if (mCtx.isPointInPath) mCtx.lineTo(sx, sy);
-                else mCtx.moveTo(sx, sy);
+                const sx = (wp.x / 8000) * w;
+                const sy = (wp.y / 6000) * h;
+                mCtx.lineTo(sx, sy);
             }
             mCtx.stroke();
         }
-        let toM = (x, y) => ({ x: (x / 8000) * 150, y: (y / 6000) * 150 });
-        let drawDots = (list, color, r) => {
-            mCtx.fillStyle = color;
-            for (let e of list) { if (e.isDead) continue; let pos = toM(e.x, e.y); mCtx.beginPath(); mCtx.arc(pos.x, pos.y, r, 0, Math.PI*2); mCtx.fill(); }
-        };
-        drawDots(game.towers.filter(t => t.team==='radiant'), '#00ff00', 3);
-        drawDots(game.towers.filter(t => t.team==='dire'), '#ff0000', 3);
-        drawDots(game.ancients.filter(a => a.team==='radiant'), '#00cc00', 5);
-        drawDots(game.ancients.filter(a => a.team==='dire'), '#cc0000', 5);
-        drawDots(game.creeps.filter(c => c.team==='radiant'), '#7cfc00', 1.5);
-        drawDots(game.creeps.filter(c => c.team==='dire'), '#8b008b', 1.5);
-        if (!game.playerHero.isDead) drawDots([game.playerHero], '#00ffff', 4);
-        if (!game.enemyHero.isDead) drawDots([game.enemyHero], '#ff00ff', 4);
+
+        const toM = (x, y) => ({ x: (x / 8000) * w, y: (y / 6000) * h });
+
+        const player = game.playerHero;
+        const isTeleportMode = player && player.isChannelingTeleport === false && player.teleportCharges > 0 && game._teleportSelectionMode;
+        let highlightTowers = [];
+        if (isTeleportMode) {
+            highlightTowers = game.towers.filter(t => t.team === player.team && !t.isDead);
+        }
+
+        for (let t of game.towers) {
+            if (t.isDead) continue;
+            const pos = toM(t.x, t.y);
+            const isHighlight = highlightTowers.includes(t);
+            mCtx.beginPath();
+            mCtx.arc(pos.x, pos.y, isHighlight ? 5 : 3, 0, Math.PI * 2);
+            if (isHighlight) {
+                mCtx.fillStyle = '#00ffff';
+                mCtx.shadowBlur = 10;
+                mCtx.shadowColor = '#00ffff';
+            } else {
+                mCtx.fillStyle = t.team === 'radiant' ? '#00ff00' : '#ff0000';
+                mCtx.shadowBlur = 0;
+            }
+            mCtx.fill();
+            mCtx.shadowBlur = 0;
+        }
+
+        for (let a of game.ancients) {
+            const pos = toM(a.x, a.y);
+            mCtx.fillStyle = a.team === 'radiant' ? '#00cc00' : '#cc0000';
+            mCtx.beginPath(); mCtx.arc(pos.x, pos.y, 5, 0, Math.PI*2); mCtx.fill();
+        }
+
+        for (let c of game.creeps) {
+            if (c.isDead) continue;
+            const pos = toM(c.x, c.y);
+            mCtx.fillStyle = c.team === 'radiant' ? '#7cfc00' : '#8b008b';
+            mCtx.beginPath(); mCtx.arc(pos.x, pos.y, 1.5, 0, Math.PI*2); mCtx.fill();
+        }
+
+        if (game.playerHero && !game.playerHero.isDead) {
+            const pos = toM(game.playerHero.x, game.playerHero.y);
+            mCtx.fillStyle = '#00ffff';
+            mCtx.beginPath(); mCtx.arc(pos.x, pos.y, 4, 0, Math.PI*2); mCtx.fill();
+        }
+        if (game.enemyHero && !game.enemyHero.isDead) {
+            const pos = toM(game.enemyHero.x, game.enemyHero.y);
+            mCtx.fillStyle = '#ff00ff';
+            mCtx.beginPath(); mCtx.arc(pos.x, pos.y, 4, 0, Math.PI*2); mCtx.fill();
+        }
+
         for (let bot of game.alliedBots) {
-            if (!bot.isDead) { const pos = toM(bot.x, bot.y); mCtx.fillStyle = '#00ddff'; mCtx.beginPath(); mCtx.arc(pos.x, pos.y, 2, 0, Math.PI*2); mCtx.fill(); }
+            if (!bot.isDead) {
+                const pos = toM(bot.x, bot.y);
+                mCtx.fillStyle = '#00ddff';
+                mCtx.beginPath(); mCtx.arc(pos.x, pos.y, 2, 0, Math.PI*2); mCtx.fill();
+            }
         }
         for (let bot of game.enemyBots) {
-            if (!bot.isDead) { const pos = toM(bot.x, bot.y); mCtx.fillStyle = '#ff44aa'; mCtx.beginPath(); mCtx.arc(pos.x, pos.y, 2, 0, Math.PI*2); mCtx.fill(); }
+            if (!bot.isDead) {
+                const pos = toM(bot.x, bot.y);
+                mCtx.fillStyle = '#ff44aa';
+                mCtx.beginPath(); mCtx.arc(pos.x, pos.y, 2, 0, Math.PI*2); mCtx.fill();
+            }
         }
         for (let b of game.barracks) {
             if (b.isDead) continue;
@@ -3159,12 +3301,20 @@ class UIManager {
             mCtx.fillStyle = b.team === 'radiant' ? '#66ff66' : '#ff6666';
             mCtx.beginPath(); mCtx.arc(pos.x, pos.y, 2, 0, Math.PI*2); mCtx.fill();
         }
+
+        if (isTeleportMode) {
+            mCtx.fillStyle = 'rgba(0, 255, 255, 0.7)';
+            mCtx.font = '8px Arial';
+            mCtx.textAlign = 'center';
+            mCtx.fillText('Click tower', w/2, h-4);
+        }
     }
 }
 
-// ----------------------------------------------
-// ОСНОВНОЙ КЛАСС ИГРЫ
-// ----------------------------------------------
+// =========================================================================
+//  ОСНОВНОЙ КЛАСС ИГРЫ
+// =========================================================================
+
 class Game {
     constructor() {
         this.map = new GameMap(); 
@@ -3197,7 +3347,8 @@ class Game {
             new BountyRune(700, 5000),
             new BountyRune(7300, 1500)
         ];
-        this.goldTimer = 0; // для пассивного золота
+        this.goldTimer = 0;
+        this._teleportSelectionMode = false;
         this.initWorld(); 
         this.initInput();
         this.initShopItems();
@@ -3407,7 +3558,7 @@ class Game {
 
     initInput() {
         canvas.addEventListener('mousedown', (e) => {
-            if (e.button !== 2) return; 
+            if (e.button !== 2) return;
             e.preventDefault();
             audio.init();
 
@@ -3418,6 +3569,9 @@ class Game {
             const wx = mouseX + this.camera.x;
             const wy = mouseY + this.camera.y;
 
+            // ---- Обработка клика по миникарте для телепорта (убрали отсюда, теперь отдельный обработчик) ----
+
+            // Обычный клик (движение/атака)
             if (this.bountyRunes) {
                 for (let rune of this.bountyRunes) {
                     if (rune.isClicked(wx, wy)) {
@@ -3472,6 +3626,47 @@ class Game {
             }
         });
 
+        // --- ОТДЕЛЬНЫЙ ОБРАБОТЧИК ДЛЯ МИНИКАРТЫ (ТЕЛЕПОРТ) ---
+        document.getElementById('minimapCanvas').addEventListener('click', (e) => {
+            // Проверим режим телепорта
+            if (!this._teleportSelectionMode || !this.playerHero || this.playerHero.isDead || this.playerHero.teleportCharges <= 0 || this.playerHero.isChannelingTeleport) {
+                return;
+            }
+            const mCanvas = document.getElementById('minimapCanvas');
+            const rect = mCanvas.getBoundingClientRect();
+            const scaleX = mCanvas.width / rect.width;   // 200 / width
+            const scaleY = mCanvas.height / rect.height;
+            const mx = (e.clientX - rect.left) * scaleX;
+            const my = (e.clientY - rect.top) * scaleY;
+            // Проверим, что клик внутри canvas
+            if (mx < 0 || mx > mCanvas.width || my < 0 || my > mCanvas.height) return;
+            // Преобразуем в мировые координаты
+            const gx = (mx / mCanvas.width) * 8000;
+            const gy = (my / mCanvas.height) * 6000;
+            // Найдём ближайшую союзную башню в радиусе 15 пикселей на миникарте
+            const clickRadiusPx = 15;
+            let closestTower = null;
+            let minDist = Infinity;
+            for (let t of this.towers) {
+                if (t.team === this.playerHero.team && !t.isDead) {
+                    // Координаты башни на миникарте
+                    const tx = (t.x / 8000) * mCanvas.width;
+                    const ty = (t.y / 6000) * mCanvas.height;
+                    const d = Math.hypot(mx - tx, my - ty);
+                    if (d < minDist && d <= clickRadiusPx) {
+                        minDist = d;
+                        closestTower = t;
+                    }
+                }
+            }
+            if (closestTower) {
+                this.playerHero.startTeleport(closestTower);
+                this._teleportSelectionMode = false;
+                e.stopPropagation();
+                e.preventDefault();
+            }
+        });
+
         window.addEventListener('keydown', (e) => {
             const k = e.key.toLowerCase();
             if (k === 'q' || k === 'й') this.playerHero.useAbility(0);
@@ -3480,7 +3675,21 @@ class Game {
             if (k === 'r' || k === 'к') this.playerHero.useAbility(3); 
             if (k === 'p' || k === 'з') this.toggleShop();
             if (k === 'g' || k === 'п') this.activateGlyph();
+            if (k === 't' || k === 'е') {
+                if (this.playerHero && !this.playerHero.isDead && this.playerHero.teleportCharges > 0 && !this.playerHero.isChannelingTeleport) {
+                    this._teleportSelectionMode = !this._teleportSelectionMode;
+                    if (this._teleportSelectionMode) {
+                        this.uiManager.addFloatingText(this.playerHero.x, this.playerHero.y - 50, '📡 Select tower on minimap', '#7dd3fc');
+                    } else {
+                        this.uiManager.addFloatingText(this.playerHero.x, this.playerHero.y - 50, '❌ Teleport cancelled', '#ff6666');
+                    }
+                } else if (this.playerHero && this.playerHero.isChannelingTeleport) {
+                    this.playerHero.cancelTeleport('new');
+                    this._teleportSelectionMode = false;
+                }
+            }
         });
+
         document.getElementById('open-shop-btn').addEventListener('click', () => this.toggleShop());
         document.getElementById('glyph-btn')?.addEventListener('click', () => this.activateGlyph());
         document.getElementById('close-shop-btn').addEventListener('click', () => this.toggleShop());
@@ -3496,6 +3705,7 @@ class Game {
     }
 
     toggleShop() { document.getElementById('shop-modal').classList.toggle('hidden'); }
+
     activateGlyph() { this.activateGlyphForTeam(this.playerHero?.team); }
 
     activateGlyphForTeam(team) {
@@ -3557,20 +3767,14 @@ class Game {
         }
         if (this.creepTimer >= 30 || this.matchTime === dt) { this.spawnWave(); this.creepTimer = 0; }
 
-        // --- Пассивное золото для игрока и ботов ---
         this.goldTimer += dt;
         if (this.goldTimer >= 1.0) {
             this.goldTimer -= 1.0;
-            // Игрок
             if (this.playerHero && !this.playerHero.isDead) {
                 this.playerHero.gold += 1;
             }
-            // Боты уже получают в своём update (у них свой таймер)
-            // Но можно и здесь добавить для всех ботов, чтобы гарантировать
-            // Однако у ботов уже есть пассивное золото в их AI, поэтому дублировать не будем.
         }
 
-        // Обновление героев и ботов
         this.playerHero.update(dt);
         this.enemyHero.update(dt);
         if (this.enemyHero.ai) this.enemyHero.ai.update(dt);
@@ -3669,6 +3873,16 @@ class Game {
                 ctx.beginPath();
                 ctx.arc(e.x - this.camera.x, e.y - this.camera.y, 15, 0, Math.PI * 2);
                 ctx.fill();
+                ctx.restore();
+            } else if (e.type === 'teleport_arrive') {
+                ctx.save();
+                ctx.fillStyle = 'rgba(125, 211, 252, 0.4)';
+                ctx.beginPath();
+                ctx.arc(e.x - this.camera.x, e.y - this.camera.y, e.radius || 40, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#7dd3fc';
+                ctx.lineWidth = 2;
+                ctx.stroke();
                 ctx.restore();
             }
         }

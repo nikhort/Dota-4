@@ -34,7 +34,6 @@
                 <h2>Huskar</h2>
                 <p>Berserker warrior. Uses his own health to deal devastating magic damage and leap at foes.</p>
             </div>
-            <!-- НОВАЯ КАРТОЧКА Anti-Mage -->
             <div class="hero-card" data-hero="Anti-Mage">
                 <div class="hero-avatar antimage"></div>
                 <h2>Anti-Mage</h2>
@@ -139,9 +138,9 @@
                             position: absolute;
                             top: 0; 
                             left: 0;
-                            width: 40px;          /* Явно задаем ширину как у кнопки */
-                            height: 40px;         /* Явно задаем высоту как у кнопки */
-                            box-sizing: border-box; /* Защищает от деформации из-за рамок */
+                            width: 40px;
+                            height: 40px;
+                            box-sizing: border-box;
                             background: rgba(0,0,0,0.7);
                             border-radius: 50%;
                             display: flex;
@@ -151,7 +150,7 @@
                             font-weight: bold;
                             color: #fff;
                             visibility: hidden;
-                            pointer-events: none; /* Чтобы клики проходили сквозь таймер на кнопку */
+                            pointer-events: none;
                         ">60</div>
                     </div>
                     <button id="open-shop-btn">🏪 Shop (P)</button>
@@ -165,7 +164,7 @@
                     </div>
                 </div>
                 <div id="minimap-container">
-                    <canvas id="minimapCanvas" width="150" height="150"></canvas>
+                    <canvas id="minimapCanvas" width="200" height="200"></canvas>
                 </div>
             </div>
         </div>

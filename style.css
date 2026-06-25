@@ -114,7 +114,6 @@ body, html {
     background-color: #7a1c00;
     border-color: #ff8c00;
 }
-/* НОВЫЙ АВАТАР Anti-Mage */
 .hero-avatar.antimage {
     background-image: url('images/antimage_icon.png');
     background-size: cover;
@@ -281,7 +280,6 @@ body, html {
 .bar-fill.hp { background: linear-gradient(to right, #16a34a, #22c55e); }
 .bar-fill.mp { background: linear-gradient(to right, #2563eb, #3b82f6); }
 
-/* Раздельная разметка текста полос здоровья и маны */
 .bar-content-wrapper {
     position: absolute;
     top: 0;
@@ -487,8 +485,8 @@ body, html {
 }
 
 #minimap-container {
-    width: 78px;
-    height: 78px;
+    width: 100px;
+    height: 100px;
     border: 1px solid #2d3f57;
     border-radius: 4px;
     overflow: hidden;
