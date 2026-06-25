@@ -607,12 +607,13 @@ class Hero extends Entity {
     constructor(x, y, team, name) {
         super(x, y, team, 22, 600, 54, 275);
         this.name = name; this.level = 1; this.xp = 0; this.maxXp = 100;
-        this.mp = 300; this.maxMp = 300; this.gold = 300; 
+        this.mp = 300; this.maxMp = 300; this.gold = 100; 
         this.inventory = new Inventory(this); this.abilities = [];
         this.hpRegenBase = 2.0; this.mpRegenBase = 1.5; this.invulnerable = false;
         this.inventoryHpRegen = 0; this.inventoryManaRegen = 0;
         this.isHealingAtFountain = false;
         this.radianceTimer = 0; // для ауры Radiance
+        this.passiveGoldTimer = 0; // для накопления золота
     }
     getHpRegen() {
         let regen = this.hpRegenBase + (this.inventoryHpRegen || 0);
@@ -2639,12 +2640,63 @@ class BotAI {
         this.retreatThreshold = 0.10; // 10% hp
         this.abilityTimer = 0;
         this.blinkTimer = 0;
+
+        // --- ЭКОНОМИКА И БИЛД ---
+        this.buildIndex = 0;
+        this.buildTimer = 0;
+        // Определяем билд в зависимости от героя
+        const name = hero.name;
+        if (name === 'Huskar') {
+            // Vanguard (ringhealth + vitality) -> Heart (ringtarrasque + reaver)
+            this.build = ['ringhealth', 'vitality', 'ringtarrasque', 'reaver'];
+            // Финальные предметы для проверки
+            this.finalItems = ['vanguard', 'heart'];
+        } else if (name === 'Anti-Mage') {
+            this.build = ['radiance'];
+            this.finalItems = ['radiance'];
+        } else if (name === 'Sniper') {
+            this.build = ['sword'];
+            this.finalItems = ['sword'];
+        } else if (name === 'Morphling') {
+            this.build = ['vladmir', 'linkens'];
+            this.finalItems = ['vladmir', 'linkens'];
+        } else if (name === 'Warlock') {
+            this.build = ['radiance', 'ringtarrasque', 'reaver'];
+            this.finalItems = ['radiance', 'heart'];
+        } else {
+            // Для других героев (Bristleback) пустой билд
+            this.build = [];
+            this.finalItems = [];
+        }
+        // Запоминаем текущий индекс в build для каждого финального предмета
+        // Простой подход: buildIndex - индекс в массиве build, но нужно знать, для какого финального предмета
+        // Мы будем покупать последовательно все компоненты в build, но проверять, не собран ли уже финальный предмет.
+        // Если финальный предмет собран, пропускаем его компоненты.
+        // Для этого используем currentFinalItemIndex
+        this.currentFinalItemIndex = 0;
+        // Инициализируем начальное золото (можно 100)
+        this.hero.gold = 100;
     }
 
     update(dt) {
         const hero = this.hero;
         if (hero.isDead) return;
 
+        // --- Пассивное золото для ботов ---
+        hero.passiveGoldTimer += dt;
+        if (hero.passiveGoldTimer >= 1.0) {
+            hero.passiveGoldTimer -= 1.0;
+            hero.gold += 2; // +2 золота в секунду для ботов
+        }
+
+        // --- Покупка предметов ---
+        this.buildTimer += dt;
+        if (this.buildTimer >= 1.0) { // проверяем каждую секунду
+            this.buildTimer = 0;
+            this.tryBuyItem();
+        }
+
+        // --- Основная логика ИИ (движение, бой и т.д.) ---
         // Проверяем состояние здоровья
         const hpPercent = hero.hp / hero.maxHp;
 
@@ -2653,6 +2705,28 @@ class BotAI {
             this.state = 'retreat';
             hero.attackTarget = null;
             hero.moveTo(this.fountain.x, this.fountain.y);
+            // Если Anti-Mage и Blink доступен, используем для быстрого отступления
+            if (hero instanceof AntiMage && hero.abilities[1].currentCooldown <= 0 && hero.mp >= 50) {
+                let dx = this.fountain.x - hero.x;
+                let dy = this.fountain.y - hero.y;
+                let dist = Math.hypot(dx, dy);
+                if (dist > 1) {
+                    let step = 600 / dist;
+                    let newX = hero.x + dx * step;
+                    let newY = hero.y + dy * step;
+                    newX = Math.max(0, Math.min(8000, newX));
+                    newY = Math.max(0, Math.min(6000, newY));
+                    hero.x = newX;
+                    hero.y = newY;
+                    hero.targetX = newX;
+                    hero.targetY = newY;
+                    hero.abilities[1].currentCooldown = hero.abilities[1].maxCooldown;
+                    hero.mp -= 50;
+                    if (game) {
+                        game.effects.push({ type: 'blink', x: hero.x, y: hero.y, life: 0.3, radius: 40, team: hero.team });
+                    }
+                }
+            }
         }
 
         // Если на базе и здоровье не полное, лечимся
@@ -2660,9 +2734,7 @@ class BotAI {
             const dist = Math.hypot(hero.x - this.fountain.x, hero.y - this.fountain.y);
             if (dist < this.fountain.radius) {
                 this.state = 'heal';
-                // Лечение выполняется в Fountain.update, здесь ничего не делаем
                 if (hero.hp >= hero.maxHp) {
-                    // Полностью вылечились, возвращаемся на линию
                     this.state = 'normal';
                     hero.attackTarget = null;
                     if (this.waypoints && this.waypoints.length > 0) {
@@ -2672,42 +2744,35 @@ class BotAI {
                 }
                 return;
             }
-            // Если ещё не дошли до фонтана, продолжаем двигаться (moveTo уже установлен)
             return;
         }
 
         // В нормальном режиме выбираем цель и двигаемся
         if (this.state === 'normal') {
-            // Поиск целей по приоритету
             const target = this.selectTarget();
             if (target) {
                 hero.attackTarget = target;
-                // Если цель вне радиуса атаки, двигаемся к ней
                 const d = Math.hypot(hero.x - target.x, hero.y - target.y);
                 if (d > hero.attackRange * 0.85) {
                     hero.moveTo(target.x, target.y);
                 }
 
-                // Использование способностей (не чаще 1 раза в 2 секунды)
                 this.abilityTimer += dt;
                 if (this.abilityTimer > 2.0) {
                     this.abilityTimer = 0;
                     this.useAbilities(target);
                 }
 
-                // Специфическая логика для Anti-Mage
                 if (hero instanceof AntiMage) {
-                    // Blink для сближения, если цель далеко
                     if (d > 400 && hero.abilities[1].currentCooldown <= 0 && hero.mp >= 50) {
                         hero.useAbility(1);
                     }
                 }
             } else {
-                // Нет целей, двигаемся по waypoints
                 hero.attackTarget = null;
                 if (this.waypoints && this.waypoints.length > 0) {
                     if (this.waypointIndex >= this.waypoints.length) {
-                        // Стоим на месте
+                        // стоим
                     } else {
                         const wp = this.waypoints[this.waypointIndex];
                         const dist = Math.hypot(hero.x - wp.x, hero.y - wp.y);
@@ -2725,26 +2790,94 @@ class BotAI {
         }
     }
 
+    // --- Методы покупки ---
+    tryBuyItem() {
+        const hero = this.hero;
+        if (this.buildIndex >= this.build.length) return; // все предметы куплены
+
+        // Проверяем, не собран ли уже финальный предмет для текущего этапа
+        // Ищем текущий финальный предмет в инвентаре
+        let currentFinalItemId = null;
+        if (this.currentFinalItemIndex < this.finalItems.length) {
+            currentFinalItemId = this.finalItems[this.currentFinalItemIndex];
+        }
+
+        // Если финальный предмет уже есть в инвентаре, переходим к следующему
+        if (currentFinalItemId) {
+            const hasFinal = hero.inventory.items.find(item => item.id === currentFinalItemId);
+            if (hasFinal) {
+                this.currentFinalItemIndex++;
+                // Если есть еще финальные предметы, продолжаем
+                if (this.currentFinalItemIndex < this.finalItems.length) {
+                    // Продолжаем
+                } else {
+                    // Все финальные предметы собраны, можно остановить покупки
+                    this.buildIndex = this.build.length; // завершить
+                }
+                return;
+            }
+        }
+
+        // Если финальный предмет еще не собран, покупаем следующий компонент
+        const itemId = this.build[this.buildIndex];
+        const cost = this.getItemCost(itemId);
+        if (hero.gold >= cost) {
+            // Проверяем, есть ли уже этот компонент в инвентаре (чтобы не покупать повторно)
+            const hasItem = hero.inventory.items.find(item => item.id === itemId);
+            if (hasItem) {
+                // Если уже есть, переходим к следующему компоненту
+                this.buildIndex++;
+                return;
+            }
+            // Пытаемся купить
+            const item = this.createItem(itemId);
+            if (item && hero.inventory.addItem(item)) {
+                hero.gold -= cost;
+                audio.play('buy');
+                // После покупки проверяем, не собран ли финальный предмет
+                // Если собран, то buildIndex останется, но при следующем вызове мы обнаружим финальный предмет.
+            } else {
+                // Не удалось добавить (инвентарь полон) — не делаем ничего
+            }
+        }
+    }
+
+    getItemCost(itemId) {
+        const costs = {
+            'ringhealth': 400,
+            'vitality': 1000,
+            'ringtarrasque': 1700,
+            'reaver': 2500,
+            'radiance': 1500,
+            'sword': 1500,
+            'vladmir': 1500,
+            'linkens': 1500
+        };
+        return costs[itemId] || 0;
+    }
+
+    createItem(itemId) {
+        // Возвращает новый Item по id
+        const items = {
+            'ringhealth': new Item('ringhealth', 'Ring of Health', 400, { hpRegen: 4.5 }),
+            'vitality': new Item('vitality', 'Vitality Booster', 1000, { hp: 250 }),
+            'ringtarrasque': new Item('ringtarrasque', 'Ring of Tarrasque', 1700, { hpRegen: 12 }),
+            'reaver': new Item('reaver', 'Reaver', 2500, { hp: 25 }),
+            'radiance': new Item('radiance', 'Radiance', 1500, { damageBonus: 20 }),
+            'sword': new Item('sword', 'Crystalys', 1500, { damageBonus: 32, critChance: 0.3, critMultiplier: 1.6 }),
+            'vladmir': new Item('vladmir', "Vladmir's Offering", 1500, { manaRegen: 0.75, armorBonus: 1 }),
+            'linkens': new Item('linkens', "Linken's Sphere", 1500, { hp: 200, mana: 200, damage: 15, manaRegen: 5 })
+        };
+        return items[itemId] || null;
+    }
+
+    // --- Остальные методы (selectTarget, useAbilities) без изменений ---
     selectTarget() {
         const hero = this.hero;
         const enemies = hero.team === 'radiant' ? this.game.direEntities() : this.game.radiantEntities();
-
-        // 1. Вражеские крипы в радиусе атаки
         const attackRange = hero.attackRange * 1.2;
-        let closestCreep = null;
-        let minDistCreep = Infinity;
-        for (let e of enemies) {
-            if (e.isDead || !e.isAttackable()) continue;
-            if (!(e instanceof Creep)) continue;
-            const d = Math.hypot(e.x - hero.x, e.y - hero.y);
-            if (d <= attackRange && d < minDistCreep) {
-                minDistCreep = d;
-                closestCreep = e;
-            }
-        }
-        if (closestCreep) return closestCreep;
 
-        // 2. Вражеские герои в радиусе атаки
+        // 1. Вражеские герои (наивысший приоритет)
         let closestHero = null;
         let minDistHero = Infinity;
         for (let e of enemies) {
@@ -2758,10 +2891,23 @@ class BotAI {
         }
         if (closestHero) return closestHero;
 
-        // 3. Вражеские строения (башни, бараки, трон) – выбираем ближайшее
+        // 2. Вражеские крипы
+        let closestCreep = null;
+        let minDistCreep = Infinity;
+        for (let e of enemies) {
+            if (e.isDead || !e.isAttackable()) continue;
+            if (!(e instanceof Creep)) continue;
+            const d = Math.hypot(e.x - hero.x, e.y - hero.y);
+            if (d <= attackRange && d < minDistCreep) {
+                minDistCreep = d;
+                closestCreep = e;
+            }
+        }
+        if (closestCreep) return closestCreep;
+
+        // 3. Строения
         let closestBuilding = null;
         let minDistBuilding = Infinity;
-        // Башни
         for (let t of this.game.towers) {
             if (t.team === hero.team || t.isDead || !t.isAttackable()) continue;
             const d = Math.hypot(t.x - hero.x, t.y - hero.y);
@@ -2770,7 +2916,6 @@ class BotAI {
                 closestBuilding = t;
             }
         }
-        // Бараки
         for (let b of this.game.barracks) {
             if (b.team === hero.team || b.isDead || !b.isAttackable()) continue;
             const d = Math.hypot(b.x - hero.x, b.y - hero.y);
@@ -2779,7 +2924,6 @@ class BotAI {
                 closestBuilding = b;
             }
         }
-        // Трон
         for (let a of this.game.ancients) {
             if (a.team === hero.team || a.isDead || !a.isAttackable()) continue;
             const d = Math.hypot(a.x - hero.x, a.y - hero.y);
@@ -2798,9 +2942,7 @@ class BotAI {
 
     useAbilities(target) {
         const hero = this.hero;
-        // Для Anti-Mage особая логика
         if (hero instanceof AntiMage) {
-            // Counterspell: использовать перед дракой или при получении урона (упрощённо - если здоровье < 70% и враг рядом)
             if (hero.abilities[2].currentCooldown <= 0 && hero.mp >= 50) {
                 const enemies = hero.team === 'radiant' ? this.game.direEntities() : this.game.radiantEntities();
                 let nearbyEnemy = enemies.find(e => Math.hypot(e.x - hero.x, e.y - hero.y) < 500 && e instanceof Hero);
@@ -2808,7 +2950,6 @@ class BotAI {
                     hero.useAbility(2);
                 }
             }
-            // Mana Void: использовать, если у цели недостающая мана > 200
             if (hero.abilities[3].currentCooldown <= 0 && hero.mp >= 150) {
                 const missing = (target.maxMp || 0) - (target.mp || 0);
                 if (missing > 200) {
@@ -2817,7 +2958,6 @@ class BotAI {
                 }
             }
         } else {
-            // Общая логика для других героев (как было)
             for (let i = 0; i < hero.abilities.length; i++) {
                 const ab = hero.abilities[i];
                 if (ab.type === 'passive') continue;
@@ -3057,18 +3197,17 @@ class Game {
             new BountyRune(700, 5000),
             new BountyRune(7300, 1500)
         ];
+        this.goldTimer = 0; // для пассивного золота
         this.initWorld(); 
         this.initInput();
-        this.initShopItems(); // добавить новые предметы в магазин
+        this.initShopItems();
     }
 
     initShopItems() {
         const shopList = document.querySelector('.shop-items-list');
         if (!shopList) return;
-        // Проверяем, не добавлены ли уже (чтобы избежать дублирования)
         if (shopList.querySelector('[data-item="ringtarrasque"]')) return;
 
-        // Ring of Tarrasque
         const ringItem = document.createElement('div');
         ringItem.className = 'shop-item';
         ringItem.setAttribute('data-item', 'ringtarrasque');
@@ -3083,7 +3222,6 @@ class Game {
         ringItem.addEventListener('click', () => this.buyItem('ringtarrasque'));
         shopList.appendChild(ringItem);
 
-        // Reaver
         const reaverItem = document.createElement('div');
         reaverItem.className = 'shop-item';
         reaverItem.setAttribute('data-item', 'reaver');
@@ -3098,7 +3236,6 @@ class Game {
         reaverItem.addEventListener('click', () => this.buyItem('reaver'));
         shopList.appendChild(reaverItem);
 
-        // Radiance
         const radianceItem = document.createElement('div');
         radianceItem.className = 'shop-item';
         radianceItem.setAttribute('data-item', 'radiance');
@@ -3135,7 +3272,6 @@ class Game {
         this.fountains.push(new Fountain(this.map.radiantBase.x - 100, this.map.radiantBase.y + 100, 'radiant'));
         this.fountains.push(new Fountain(this.map.direBase.x + 100, this.map.direBase.y - 100, 'dire'));
 
-        // Исправление нижней линии: бараки между троном и T3, башни в порядке T3, T2, T1 от базы
         const laneData = {
             top: {
                 towers: {
@@ -3389,7 +3525,6 @@ class Game {
         if (type === 'ringhealth') it = new Item('ringhealth', 'Ring of Health', 400, { hpRegen: 4.5 });
         if (type === 'vladmir') it = new Item('vladmir', "Vladmir's Offering", 1500, { manaRegen: 0.75, armorBonus: 1 });
         if (type === 'linkens') it = new Item('linkens', "Linken's Sphere", 1500, { hp: 200, mana: 200, damage: 15, manaRegen: 5 });
-        // Новые предметы
         if (type === 'ringtarrasque') it = new Item('ringtarrasque', 'Ring of Tarrasque', 1700, { hpRegen: 12 });
         if (type === 'reaver') it = new Item('reaver', 'Reaver', 2500, { hp: 25 });
         if (type === 'radiance') it = new Item('radiance', 'Radiance', 1500, { damageBonus: 20 });
@@ -3421,6 +3556,19 @@ class Game {
             }
         }
         if (this.creepTimer >= 30 || this.matchTime === dt) { this.spawnWave(); this.creepTimer = 0; }
+
+        // --- Пассивное золото для игрока и ботов ---
+        this.goldTimer += dt;
+        if (this.goldTimer >= 1.0) {
+            this.goldTimer -= 1.0;
+            // Игрок
+            if (this.playerHero && !this.playerHero.isDead) {
+                this.playerHero.gold += 1;
+            }
+            // Боты уже получают в своём update (у них свой таймер)
+            // Но можно и здесь добавить для всех ботов, чтобы гарантировать
+            // Однако у ботов уже есть пассивное золото в их AI, поэтому дублировать не будем.
+        }
 
         // Обновление героев и ботов
         this.playerHero.update(dt);
@@ -3522,8 +3670,6 @@ class Game {
                 ctx.arc(e.x - this.camera.x, e.y - this.camera.y, 15, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.restore();
-            } else if (e.type === 'reflect') {
-                // небольшой эффект отражения
             }
         }
         this.uiManager.draw(ctx, this.camera);
