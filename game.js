@@ -2753,6 +2753,11 @@ class BotAI {
         const hero = this.hero;
         if (hero.isDead) return;
 
+        // ===== КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: если герой каналит телепорт, НЕ ДЕЛАЕМ НИЧЕГО =====
+        if (hero.isChannelingTeleport) {
+            return;
+        }
+
         hero.passiveGoldTimer += dt;
         if (hero.passiveGoldTimer >= 1.0) {
             hero.passiveGoldTimer -= 1.0;
