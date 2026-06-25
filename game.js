@@ -371,6 +371,9 @@ class Entity {
         this._stuckCheckTimer = 0;
         this._lastPos = { x: this.x, y: this.y };
         this._stuckTime = 0;
+        // Для Counterspell
+        this.counterspellActive = false;
+        this.counterspellTimer = 0;
     }
 
     // Проверка, можно ли атаковать эту цель
@@ -427,6 +430,13 @@ class Entity {
     updateBuffs(dt) {
         if (this.silenceTimer > 0) this.silenceTimer -= dt;
         if (this.lifeBreakSlowTimer > 0) this.lifeBreakSlowTimer -= dt;
+        if (this.counterspellTimer > 0) {
+            this.counterspellTimer -= dt;
+            if (this.counterspellTimer <= 0) {
+                this.counterspellActive = false;
+                this.counterspellTimer = 0;
+            }
+        }
 
         if (this.burningSpears && this.burningSpears.length > 0) {
             for (let i = this.burningSpears.length - 1; i >= 0; i--) {
@@ -602,6 +612,7 @@ class Hero extends Entity {
         this.hpRegenBase = 2.0; this.mpRegenBase = 1.5; this.invulnerable = false;
         this.inventoryHpRegen = 0; this.inventoryManaRegen = 0;
         this.isHealingAtFountain = false;
+        this.radianceTimer = 0; // для ауры Radiance
     }
     getHpRegen() {
         let regen = this.hpRegenBase + (this.inventoryHpRegen || 0);
@@ -709,6 +720,27 @@ class Hero extends Entity {
         if (this.hasLinkens && this.linkensCooldown > 0) {
             this.linkensCooldown = Math.max(0, this.linkensCooldown - dt);
         }
+
+        // --- Radiance Aura ---
+        if (this.inventory) {
+            const radianceItem = this.inventory.items.find(item => item.id === 'radiance');
+            if (radianceItem) {
+                const radius = 500;
+                this.radianceTimer += dt;
+                if (this.radianceTimer >= 1.0) {
+                    this.radianceTimer -= 1.0;
+                    const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+                    for (let e of enemies) {
+                        if (e.isDead) continue;
+                        const d = Math.hypot(e.x - this.x, e.y - this.y);
+                        if (d <= radius) {
+                            e.takeDamage(20, this, false, 'magic');
+                            if (game) game.effects.push({ type: 'radiance_burn', x: e.x, y: e.y, life: 0.1 });
+                        }
+                    }
+                }
+            }
+        }
     }
     
     blockSpell(caster) {
@@ -722,6 +754,20 @@ class Hero extends Entity {
         return false;
     }
     performAttack() {
+        // Проверка промаха от Radiance у цели
+        if (this.attackTarget && this.attackTarget.inventory) {
+            const radianceItem = this.attackTarget.inventory.items.find(item => item.id === 'radiance');
+            if (radianceItem) {
+                const d = Math.hypot(this.x - this.attackTarget.x, this.y - this.attackTarget.y);
+                if (d <= 500) {
+                    if (Math.random() < 0.05) {
+                        game.uiManager.addFloatingText(this.x, this.y - 20, "MISS", '#ff6666');
+                        return; // промах, атака не происходит
+                    }
+                }
+            }
+        }
+
         this.attackCooldown = this.attackSpeed; audio.play('attack');
         let finalDamage = this.damage;
         if (this.vladmirAura) finalDamage *= 1.18;
@@ -1617,6 +1663,174 @@ class Huskar extends Hero {
 }
 
 // ----------------------------------------------
+// НОВЫЙ ГЕРОЙ: Anti-Mage
+// ----------------------------------------------
+class AntiMage extends Hero {
+    constructor(x, y, team) {
+        super(x, y, team, 'Anti-Mage');
+        // Ближний бой, повышенные характеристики
+        this.maxHp = 800;
+        this.hp = 800;
+        this.damage = 58;
+        this.baseSpeed = 260;
+        this.speed = 260;
+        this.attackRange = 100; // ближний бой
+        this.attackSpeed = 1.2;
+        // Мана
+        this.maxMp = 300;
+        this.mp = 300;
+        // Пассивное сопротивление магии от Counterspell
+        this.magicResistance = 0.14;
+
+        this.abilities = [
+            new Ability('Mana Break', 'passive', 0, 0, 'Burns 25 mana per attack, dealing bonus physical damage equal to mana burned.'),
+            new Ability('Blink', 'active', 7, 50, 'Teleports a short distance instantly.'),
+            new Ability('Counterspell', 'active', 15, 50, 'Passive: +14% magic resistance. Active: creates a shield for 1.3s that reflects single-target spells.'),
+            new Ability('Mana Void', 'active', 70, 150, 'Deals damage to target and nearby enemies based on missing mana. Stuns for 0.3s.')
+        ];
+    }
+
+    // Переопределяем performAttack для Mana Break
+    performAttack() {
+        this.attackCooldown = this.attackSpeed;
+        audio.play('attack');
+        let finalDamage = this.damage;
+        if (this.vladmirAura) finalDamage *= 1.18;
+
+        let critChance = 0;
+        let critMultiplier = 1;
+        for (let item of this.inventory.items) {
+            if (item.stats?.critChance) critChance = Math.max(critChance, item.stats.critChance);
+            if (item.stats?.critMultiplier) critMultiplier = Math.max(critMultiplier, item.stats.critMultiplier);
+        }
+
+        // Создаём снаряд с пометкой manaBreak
+        let proj = new Projectile(this.x, this.y, this.attackTarget, finalDamage, this.team, this);
+        proj.isManaBreak = true; // специальный флаг для Anti-Mage
+        if (Math.random() < critChance) {
+            proj.isCrit = true;
+            proj.damage = Math.max(1, proj.damage * critMultiplier);
+        }
+        game.projectiles.push(proj);
+    }
+
+    useAbility(idx) {
+        if (this.isDead || this.silenceTimer > 0) return;
+
+        if (idx === 1) { // Blink
+            const ab = this.abilities[1];
+            if (!ab.trigger(this)) return;
+            // Перемещаем на 600 в направлении цели или в сторону мыши (упрощённо - к цели атаки или вперёд)
+            let targetX = this.targetX;
+            let targetY = this.targetY;
+            if (this.attackTarget) {
+                targetX = this.attackTarget.x;
+                targetY = this.attackTarget.y;
+            }
+            let dx = targetX - this.x;
+            let dy = targetY - this.y;
+            let dist = Math.hypot(dx, dy);
+            if (dist > 1) {
+                let step = 600 / dist;
+                let newX = this.x + dx * step;
+                let newY = this.y + dy * step;
+                // Ограничение картой
+                newX = Math.max(0, Math.min(8000, newX));
+                newY = Math.max(0, Math.min(6000, newY));
+                this.x = newX;
+                this.y = newY;
+                // Обновляем цели движения
+                this.targetX = newX;
+                this.targetY = newY;
+                // Визуальный эффект (можно добавить вспышку)
+                if (game) {
+                    game.effects.push({
+                        type: 'blink',
+                        x: this.x,
+                        y: this.y,
+                        life: 0.3,
+                        radius: 40,
+                        team: this.team
+                    });
+                }
+            }
+        } else if (idx === 2) { // Counterspell (активный)
+            const ab = this.abilities[2];
+            if (!ab.trigger(this)) return;
+            this.counterspellActive = true;
+            this.counterspellTimer = 1.3;
+            // Визуальный эффект
+            if (game) {
+                game.effects.push({
+                    type: 'counterspell_shield',
+                    x: this.x,
+                    y: this.y,
+                    life: 1.3,
+                    radius: this.radius * 1.5,
+                    team: this.team
+                });
+            }
+        } else if (idx === 3) { // Mana Void
+            const ab = this.abilities[3];
+            if (!ab.trigger(this)) return;
+            // Находим цель
+            let target = this.attackTarget;
+            if (!target || target.isDead || target.team === this.team) {
+                const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+                target = enemies.find(e => Math.hypot(e.x - this.x, e.y - this.y) < 600);
+            }
+            if (!target || target.isDead) return;
+            // Вычисляем недостающую ману (учитываем, что мана может быть 0)
+            let missingMana = Math.max(0, (target.maxMp || 0) - (target.mp || 0));
+            // Урон = недостающая мана * 1 (но для баланса можно ограничить)
+            let damage = missingMana * 1;
+            // Применяем урон к цели и всем врагам в радиусе 350
+            const radius = 350;
+            const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+            for (let e of enemies) {
+                if (e.isDead) continue;
+                if (e === target || Math.hypot(e.x - target.x, e.y - target.y) <= radius) {
+                    // Оглушаем цель (и только её?) - по описанию цель оглушается, остальные получают урон
+                    if (e === target) {
+                        e.stunned = true;
+                        e.stunTimer = Math.max(e.stunTimer || 0, 0.3);
+                    }
+                    e.takeDamage(damage, this, false, 'magic');
+                }
+            }
+            // Визуальный эффект взрыва
+            if (game) {
+                game.effects.push({
+                    type: 'mana_void',
+                    x: target.x,
+                    y: target.y,
+                    life: 0.6,
+                    radius: radius,
+                    team: this.team
+                });
+            }
+        }
+    }
+
+    draw(ctx, camera) {
+        super.draw(ctx, camera);
+        if (this.isDead) return;
+        // Если активен Counterspell, рисуем щит
+        if (this.counterspellActive) {
+            let sx = this.x - camera.x;
+            let sy = this.y - camera.y;
+            ctx.save();
+            ctx.strokeStyle = 'rgba(0, 200, 255, 0.6)';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(sx, sy, this.radius * 1.6, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+}
+
+// ----------------------------------------------
 // ВСПОМОГАТЕЛЬНЫЕ КЛАССЫ
 // ----------------------------------------------
 class ShrapnelZone {
@@ -2136,18 +2350,73 @@ class Fountain {
     }
 }
 
+// Модифицированный Projectile с поддержкой Mana Break и Counterspell отражения
 class Projectile {
     constructor(x, y, target, damage, team, attacker) {
         this.x = x; this.y = y; this.target = target; this.damage = damage; this.team = team; this.attacker = attacker;
         this.speed = 500; this.radius = 5; this.isHs = false; this.isAss = false;
         this.isCrit = false; this.isBurningSpear = false;
+        this.isManaBreak = false; // для Anti-Mage
+        this.reflected = false;   // для Counterspell
     }
+
+    reflect() {
+        // Отражение снаряда обратно на атакующего
+        if (this.reflected) return;
+        const originalTarget = this.target;
+        if (!this.attacker) return;
+        // Меняем цель на того, кто выпустил снаряд (если это живой враг)
+        if (this.attacker.isDead) return;
+        // Меняем направление: цель = атакующий
+        this.target = this.attacker;
+        // Меняем команду на противоположную, чтобы не считать своим
+        this.team = this.attacker.team === 'radiant' ? 'dire' : 'radiant';
+        this.reflected = true;
+        // Добавляем визуальный эффект (можно через game.effects)
+        if (game) {
+            game.effects.push({
+                type: 'reflect',
+                x: this.x,
+                y: this.y,
+                life: 0.1,
+                radius: 10,
+                team: this.team
+            });
+        }
+    }
+
     update(dt) {
         if (!this.target || this.target.isDead) return true;
+        // Проверка на отражение: если цель имеет активный Counterspell и снаряд не отражён, отражаем
+        if (this.target.counterspellActive && !this.reflected) {
+            this.reflect();
+            return false; // продолжаем лететь
+        }
         let dx = this.target.x - this.x;
         let dy = this.target.y - this.y;
         let dist = Math.hypot(dx, dy);
         if (dist < 12) {
+            // Попадание в цель
+            // Mana Break (для Anti-Mage)
+            if (this.isManaBreak && this.attacker instanceof AntiMage) {
+                const target = this.target;
+                // Сжигаем ману и наносим доп. урон
+                if (target.maxMp > 0) {
+                    const burnAmount = Math.min(25, target.mp);
+                    if (burnAmount > 0) {
+                        target.mp -= burnAmount;
+                        // Доп. урон равен сожжённой мане (физический)
+                        const bonusDamage = burnAmount;
+                        // Добавляем бонусный урон к основному (но он уже рассчитан как обычный)
+                        // Мы добавим его как отдельный урон через takeDamage
+                        target.takeDamage(bonusDamage, this.attacker, false, 'physical');
+                        // Отображаем эффект
+                        game.uiManager.addFloatingText(target.x, target.y - 30, `-${burnAmount} mana`, '#66ccff');
+                    }
+                }
+            }
+
+            // Обычный урон
             if (this.isHs) {
                 this.target.slowTimer = 1.5;
                 this.target.headshotSlowTimer = 1.5;
@@ -2173,7 +2442,9 @@ class Projectile {
                 if (!this.target.burningSpears) this.target.burningSpears = [];
                 this.target.burningSpears.push({ duration: 9.0, tickTimer: 0, attacker: this.attacker });
             }
+            // Наносим основной урон (уже с учётом крита и т.д.)
             this.target.takeDamage(this.damage, this.attacker);
+            // Вампиризм
             try {
                 const attacker = this.attacker;
                 if (attacker && attacker.vladmirAura) {
@@ -2185,12 +2456,20 @@ class Projectile {
             if (this.isAss && this.target.isDead) { game.uiManager.addFloatingText(this.target.x, this.target.y - 45, "ASSASSINATED!", '#ff0000'); }
             return true;
         }
-        this.x += (dx / dist) * this.speed * dt; this.y += (dy / dist) * this.speed * dt;
+        this.x += (dx / dist) * this.speed * dt;
+        this.y += (dy / dist) * this.speed * dt;
         return false;
     }
+
     draw(ctx, camera) {
         let sx = this.x - camera.x; let sy = this.y - camera.y;
-        ctx.fillStyle = this.isAss ? '#ff0000' : (this.isHs ? '#ff8c00' : (this.isBurningSpear ? '#ff4500' : '#ffff00'));
+        let color = '#ffff00';
+        if (this.isAss) color = '#ff0000';
+        else if (this.isHs) color = '#ff8c00';
+        else if (this.isBurningSpear) color = '#ff4500';
+        else if (this.isManaBreak) color = '#66ccff';
+        else if (this.reflected) color = '#ff66ff';
+        ctx.fillStyle = color;
         ctx.beginPath(); ctx.arc(sx, sy, this.radius, 0, Math.PI*2); ctx.fill();
     }
 }
@@ -2359,6 +2638,7 @@ class BotAI {
         this.waypointIndex = 0;
         this.retreatThreshold = 0.10; // 10% hp
         this.abilityTimer = 0;
+        this.blinkTimer = 0;
     }
 
     update(dt) {
@@ -2407,11 +2687,20 @@ class BotAI {
                 if (d > hero.attackRange * 0.85) {
                     hero.moveTo(target.x, target.y);
                 }
+
                 // Использование способностей (не чаще 1 раза в 2 секунды)
                 this.abilityTimer += dt;
                 if (this.abilityTimer > 2.0) {
                     this.abilityTimer = 0;
                     this.useAbilities(target);
+                }
+
+                // Специфическая логика для Anti-Mage
+                if (hero instanceof AntiMage) {
+                    // Blink для сближения, если цель далеко
+                    if (d > 400 && hero.abilities[1].currentCooldown <= 0 && hero.mp >= 50) {
+                        hero.useAbility(1);
+                    }
                 }
             } else {
                 // Нет целей, двигаемся по waypoints
@@ -2509,18 +2798,36 @@ class BotAI {
 
     useAbilities(target) {
         const hero = this.hero;
-        // Простая логика: если есть способность 0 и она готова, и цель в радиусе (для простоты используем 500)
-        for (let i = 0; i < hero.abilities.length; i++) {
-            const ab = hero.abilities[i];
-            if (ab.type === 'passive') continue;
-            if (ab.currentCooldown > 0) continue;
-            if (hero.mp < ab.manaCost) continue;
-            // Проверяем дальность (приблизительно)
-            const dist = Math.hypot(hero.x - target.x, hero.y - target.y);
-            if (dist <= 500) {
-                // Используем способность
-                hero.useAbility(i);
-                return;
+        // Для Anti-Mage особая логика
+        if (hero instanceof AntiMage) {
+            // Counterspell: использовать перед дракой или при получении урона (упрощённо - если здоровье < 70% и враг рядом)
+            if (hero.abilities[2].currentCooldown <= 0 && hero.mp >= 50) {
+                const enemies = hero.team === 'radiant' ? this.game.direEntities() : this.game.radiantEntities();
+                let nearbyEnemy = enemies.find(e => Math.hypot(e.x - hero.x, e.y - hero.y) < 500 && e instanceof Hero);
+                if (nearbyEnemy && hero.hp / hero.maxHp < 0.7) {
+                    hero.useAbility(2);
+                }
+            }
+            // Mana Void: использовать, если у цели недостающая мана > 200
+            if (hero.abilities[3].currentCooldown <= 0 && hero.mp >= 150) {
+                const missing = (target.maxMp || 0) - (target.mp || 0);
+                if (missing > 200) {
+                    hero.attackTarget = target;
+                    hero.useAbility(3);
+                }
+            }
+        } else {
+            // Общая логика для других героев (как было)
+            for (let i = 0; i < hero.abilities.length; i++) {
+                const ab = hero.abilities[i];
+                if (ab.type === 'passive') continue;
+                if (ab.currentCooldown > 0) continue;
+                if (hero.mp < ab.manaCost) continue;
+                const dist = Math.hypot(hero.x - target.x, hero.y - target.y);
+                if (dist <= 500) {
+                    hero.useAbility(i);
+                    return;
+                }
             }
         }
     }
@@ -2574,6 +2881,9 @@ class UIManager {
                 } else if (heroKey === 'Huskar') {
                     profileIcon.src = 'images/Huskar_icon.webp';
                     profileIcon.alt = 'Huskar profile';
+                } else if (heroKey === 'Anti-Mage') {
+                    profileIcon.src = 'images/antimage_profile.png';
+                    profileIcon.alt = 'Anti-Mage profile';
                 } else {
                     profileIcon.src = '';
                     profileIcon.alt = '';
@@ -2770,7 +3080,6 @@ class Game {
                 <p>Bonus: +12 HP regen</p>
             </div>
         `;
-        // Добавляем обработчик клика
         ringItem.addEventListener('click', () => this.buyItem('ringtarrasque'));
         shopList.appendChild(ringItem);
 
@@ -2788,6 +3097,23 @@ class Game {
         `;
         reaverItem.addEventListener('click', () => this.buyItem('reaver'));
         shopList.appendChild(reaverItem);
+
+        // Radiance
+        const radianceItem = document.createElement('div');
+        radianceItem.className = 'shop-item';
+        radianceItem.setAttribute('data-item', 'radiance');
+        radianceItem.innerHTML = `
+            <img class="shop-item-icon" src="images/radiance_icon.png" alt="Radiance">
+            <div class="shop-item-info">
+                <h3>🔥 Radiance</h3>
+                <p>Price: 1500 🪙</p>
+                <p>Bonus: +20 damage</p>
+                <p>Passive: Burns nearby enemies for 20 magic damage/sec.</p>
+                <p>Enemies in radius have 5% miss chance.</p>
+            </div>
+        `;
+        radianceItem.addEventListener('click', () => this.buyItem('radiance'));
+        shopList.appendChild(radianceItem);
     }
 
     getAllHeroes() {
@@ -2872,7 +3198,7 @@ class Game {
     start(selectedHeroName) {
         audio.init();
         this.playerHero = this.createHero(selectedHeroName, this.map.radiantBase.x, this.map.radiantBase.y, 'radiant');
-        const pool = ['Morphling', 'Warlock', 'Sniper', 'Bristleback', 'Huskar'];
+        const pool = ['Morphling', 'Warlock', 'Sniper', 'Bristleback', 'Huskar', 'Anti-Mage'];
         this.enemyHero = this.createHero(pool[Math.floor(Math.random() * pool.length)], this.map.direBase.x, this.map.direBase.y, 'dire');
         this.enemyHero.ai = new BotAI(this.enemyHero, 'mid', this);
 
@@ -2910,6 +3236,7 @@ class Game {
         if (name === 'Warlock') return new Warlock(x, y, team);
         if (name === 'Bristleback') return new Bristleback(x, y, team);
         if (name === 'Huskar') return new Huskar(x, y, team);
+        if (name === 'Anti-Mage') return new AntiMage(x, y, team);
         return new Sniper(x, y, team);
     }
 
@@ -3065,6 +3392,7 @@ class Game {
         // Новые предметы
         if (type === 'ringtarrasque') it = new Item('ringtarrasque', 'Ring of Tarrasque', 1700, { hpRegen: 12 });
         if (type === 'reaver') it = new Item('reaver', 'Reaver', 2500, { hp: 25 });
+        if (type === 'radiance') it = new Item('radiance', 'Radiance', 1500, { damageBonus: 20 });
         if (it && p.gold >= it.cost && p.inventory.addItem(it)) { 
             p.gold -= it.cost; audio.play('buy');
             if (it.id === 'vladmir') { p.hasVladmir = true; }
@@ -3162,6 +3490,40 @@ class Game {
                 ctx.arc(e.x - this.camera.x, e.y - this.camera.y, 35, 0, Math.PI * 2);
                 ctx.stroke();
                 ctx.restore();
+            } else if (e.type === 'blink') {
+                ctx.save();
+                ctx.fillStyle = 'rgba(0, 255, 255, 0.3)';
+                ctx.beginPath();
+                ctx.arc(e.x - this.camera.x, e.y - this.camera.y, e.radius || 40, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            } else if (e.type === 'counterspell_shield') {
+                ctx.save();
+                ctx.strokeStyle = 'rgba(0, 200, 255, 0.5)';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.arc(e.x - this.camera.x, e.y - this.camera.y, e.radius || 30, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.restore();
+            } else if (e.type === 'mana_void') {
+                ctx.save();
+                ctx.fillStyle = 'rgba(100, 0, 255, 0.2)';
+                ctx.beginPath();
+                ctx.arc(e.x - this.camera.x, e.y - this.camera.y, e.radius || 350, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = '#8800ff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.restore();
+            } else if (e.type === 'radiance_burn') {
+                ctx.save();
+                ctx.fillStyle = 'rgba(255, 140, 0, 0.3)';
+                ctx.beginPath();
+                ctx.arc(e.x - this.camera.x, e.y - this.camera.y, 15, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            } else if (e.type === 'reflect') {
+                // небольшой эффект отражения
             }
         }
         this.uiManager.draw(ctx, this.camera);

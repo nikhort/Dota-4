@@ -47,7 +47,10 @@ body, html {
 
 .hero-container {
     display: flex;
+    flex-wrap: wrap;
     gap: 30px;
+    justify-content: center;
+    max-width: 1200px;
 }
 
 .hero-card {
@@ -110,6 +113,14 @@ body, html {
     background-position: center;
     background-color: #7a1c00;
     border-color: #ff8c00;
+}
+/* НОВЫЙ АВАТАР Anti-Mage */
+.hero-avatar.antimage {
+    background-image: url('images/antimage_icon.png');
+    background-size: cover;
+    background-position: center;
+    background-color: #1a2a3a;
+    border-color: #66ccff;
 }
 
 .autocast-active {
