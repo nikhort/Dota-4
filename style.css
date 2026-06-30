@@ -1,0 +1,600 @@
+/* style.css */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    user-select: none;
+}
+
+body, html {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background-color: #0b0e11;
+    font-family: 'Arial', sans-serif;
+    color: #e2e8f0;
+}
+
+.screen {
+    position: absolute;
+    width: 100%;
+    height: 100%;   
+    top: 0;
+    left: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* Экран выбора героя */
+#hero-selection {
+    background: radial-gradient(circle at center, #1a2333 0%, #0d111a 100%);
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+
+.title {
+    font-size: 36px;
+    letter-spacing: 3px;
+    color: #ffd700;
+    text-shadow: 0 0 15px rgba(255, 215, 0, 0.4);
+    margin-bottom: 50px;
+}
+
+.hero-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 30px;
+    justify-content: center;
+    max-width: 1200px;
+}
+
+.hero-card {
+    width: 260px;
+    background: #151d2a;
+    border: 2px solid #2d3d54;
+    border-radius: 8px;
+    padding: 20px;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+
+.hero-card:hover {
+    transform: translateY(-10px);
+    border-color: #00bfff;
+    box-shadow: 0 10px 25px rgba(0, 191, 255, 0.25);
+}
+
+
+.hero-avatar {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    margin: 0 auto 15px;
+    border: 3px solid #fff;
+}
+
+.hero-avatar.morphling { 
+    background-image: url('images/Morphling_icon.webp');
+    background-size: cover;
+    background-position: center;
+    background-color: #00458b;
+    border-color: #00bfff; 
+}
+.hero-avatar.warlock { 
+    background-image: url('images/Warlock_icon.webp');
+    background-size: cover;
+    background-position: center;
+    background-color: #4a0000;
+    border-color: #ff4500; 
+}
+.hero-avatar.sniper { 
+    background-image: url('images/Sniper_icon.webp');
+    background-size: cover;
+    background-position: center;
+    background-color: #3a2200;
+    border-color: #ffa500; 
+}
+.hero-avatar.bristleback {
+    background-image: url('images/Bristleback_icon.svg');
+    background-size: cover;
+    background-position: center;
+    background-color: #4d3f1e;
+    border-color: #f9d342;
+}
+.hero-avatar.huskar {
+    background-image: url('images/Huskar_icon.webp');
+    background-size: cover;
+    background-position: center;
+    background-color: #7a1c00;
+    border-color: #ff8c00;
+}
+.hero-avatar.antimage {
+    background-image: url('images/antimage_icon.png');
+    background-size: cover;
+    background-position: center;
+    background-color: #1a2a3a;
+    border-color: #66ccff;
+}
+.hero-avatar.broodmother {
+    background-image: url('images/broodmother_icon.png');
+    background-size: cover;
+    background-position: center;
+    background-color: #2d1b1b;
+    border-color: #8b0000;
+}
+
+.autocast-active {
+    border: 2px solid #ffaa00 !important;
+    box-shadow: 0 0 10px #ffaa00, inset 0 0 10px rgba(255, 170, 0, 0.5);
+}
+
+.hero-card h2 {
+    margin-bottom: 10px;
+    color: #fff;
+}
+
+.hero-card p {
+    font-size: 13px;
+    color: #a0aec0;
+    line-height: 1.5;
+}
+
+/* Игровой экран */
+#game-screen {
+    position: relative;
+}
+
+#gameCanvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* Верхняя панель */
+#top-bar {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(17, 24, 39, 0.85);
+    border-bottom-left-radius: 8px;
+    border-bottom-right-radius: 8px;
+    border: 1px solid #2d3748;
+    border-top: none;
+    padding: 10px 40px;
+    display: flex;
+    align-items: center;
+    gap: 50px;
+    font-weight: bold;
+    z-index: 5;
+}
+
+.throne-hp.radiant { color: #33ff33; }
+.throne-hp.dire { color: #ff3333; }
+#match-timer { font-size: 20px; color: #fff; }
+
+/* Нижний HUD */
+#hud-container {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 160px;
+    background: linear-gradient(to top, #090d14 80%, rgba(9, 13, 20, 0.95) 100%);
+    border-top: 2px solid #1a2636;
+    display: flex;
+    padding: 12px;
+    gap: 15px;
+    z-index: 5;
+}
+
+.hud-left, .hud-center, .hud-right {
+    display: flex;
+    height: 100%;
+}
+
+.hud-left {
+    width: 22%;
+    background: #0f1622;
+    border: 1px solid #1e2d42;
+    border-radius: 6px;
+    padding: 10px;
+    align-items: center;
+    gap: 15px;
+}
+
+#hero-level-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: #1a2636;
+    border: 2px solid #ffd700;
+    border-radius: 50%;
+    width: 55px;
+    height: 55px;
+}
+
+#hero-profile-icon {
+    width: 100%;
+    height: 100%;
+    border-radius: 0;
+    object-fit: cover;
+    display: block;
+    background: transparent;
+    border: none;
+    margin: 0;
+    padding: 0;
+}
+
+.hero-profile-holder {
+    width: 110px;
+    height: 110px;
+    flex-shrink: 0;
+    border-radius: 14px;
+    overflow: hidden;
+    background: rgba(15, 22, 34, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 0;
+}
+
+#hero-level-container .label { font-size: 9px; color: #ffd700; font-weight: bold; }
+#hero-level-badge { font-size: 18px; font-weight: bold; color: #fff; }
+
+.stats-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex-grow: 1;
+}
+
+.stat-row {
+    font-size: 13px;
+    font-weight: bold;
+}
+
+/* Центр HUD: Бары и скиллы */
+.hud-center {
+    width: 56%;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.bar-container {
+    position: relative;
+    width: 100%;
+    height: 20px;
+    background: #11161b;
+    border: 1px solid #232d38;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 2px;
+}
+
+.bar-fill {
+    height: 100%;
+    width: 100%;
+    transition: width 0.1s linear;
+}
+
+#xp-bar { background: linear-gradient(to right, #9333ea, #a855f7); }
+.bar-fill.hp { background: linear-gradient(to right, #16a34a, #22c55e); }
+.bar-fill.mp { background: linear-gradient(to right, #2563eb, #3b82f6); }
+
+.bar-content-wrapper {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    padding: 0 10px;
+}
+
+.bar-text {
+    font-size: 11px;
+    font-weight: bold;
+    color: #fff;
+    text-shadow: 1px 1px 2px #000;
+}
+
+.bar-text.centered {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.bar-regen {
+    font-size: 11px;
+    font-weight: bold;
+    text-shadow: 1px 1px 2px #000;
+}
+
+#hp-regen-text { color: #86efac; }
+#mp-regen-text { color: #93c5fd; }
+
+.bar-regen.right {
+    margin-left: auto;
+}
+
+/* Панель скиллов */
+#abilities-panel {
+    display: flex;
+    gap: 10px;
+    height: 52px;
+    margin-top: 4px;
+}
+
+.ability-slot {
+    flex: 1;
+    background: #182230;
+    border: 1px solid #2d3f57;
+    border-radius: 4px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.ability-slot:hover .tooltip {
+    display: block;
+}
+
+.ability-hotkey {
+    position: absolute;
+    top: 2px;
+    left: 4px;
+    font-size: 9px;
+    font-weight: bold;
+    color: #ffd700;
+    background: rgba(0,0,0,0.5);
+    padding: 1px 3px;
+    border-radius: 2px;
+}
+
+.ability-name {
+    font-size: 12px;
+    font-weight: bold;
+    text-align: center;
+    padding: 0 4px;
+    color: #e2e8f0;
+}
+
+.cooldown-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: bold;
+    color: #fff;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.1s ease;
+}
+
+.tooltip {
+    display: none;
+    position: absolute;
+    bottom: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 240px;
+    background: rgba(11, 15, 23, 0.95);
+    border: 1px solid #3182ce;
+    border-radius: 4px;
+    padding: 10px;
+    font-size: 12px;
+    color: #e2e8f0;
+    line-height: 1.4;
+    z-index: 100;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+}
+
+/* Shop modal and item icon styles */
+.shop-items-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 420px;
+    overflow: auto;
+    padding: 8px;
+}
+.shop-item {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.shop-item-icon {
+    width: 56px;
+    height: 56px;
+    object-fit: cover;
+    border-radius: 6px;
+    flex-shrink: 0;
+    background: #0b0e11;
+}
+.shop-item-info h3 { margin: 0 0 4px 0; }
+.shop-item-info p { margin: 2px 0; font-size: 13px; color: #cbd5e1; }
+
+/* Правая сторона HUD */
+.hud-right {
+    width: 22%;
+    background: #0f1622;
+    border: 1px solid #1e2d42;
+    border-radius: 6px;
+    padding: 8px;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.gold-and-inventory {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 55%;
+}
+
+#gold-container {
+    font-size: 13px;
+    font-weight: bold;
+    color: #ffd700;
+}
+
+#open-shop-btn {
+    background: #2b6cb0;
+    border: none;
+    border-radius: 3px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: bold;
+    padding: 4px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+#open-shop-btn:hover { background: #3182ce; }
+
+#inventory-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+}
+
+.inventory-slot {
+    height: 26px;
+    background: #11161b;
+    border: 1px solid #222c3a;
+    border-radius: 2px;
+    font-size: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    color: #90cdf4;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+#minimap-container {
+    width: 100px;
+    height: 100px;
+    border: 1px solid #2d3f57;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+#minimapCanvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* Модальное окно лавки */
+#shop-modal {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+}
+
+.shop-content {
+    width: 500px;
+    background: #1a2230;
+    border: 2px solid #2b6cb0;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.7);
+}
+
+.shop-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #2d3f57;
+    padding-bottom: 10px;
+    margin-bottom: 15px;
+}
+
+#close-shop-btn {
+    background: #c53030;
+    border: none;
+    color: #fff;
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+#close-shop-btn:hover { background: #e53e3e; }
+
+.shop-items-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.shop-item {
+    background: #243042;
+    border: 1px solid #3182ce;
+    border-radius: 6px;
+    padding: 12px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.shop-item:hover {
+    background: #2b3b52;
+}
+
+.shop-item h3 { font-size: 15px; color: #fff; margin-bottom: 4px; }
+.shop-item p { font-size: 12px; color: #cbd5e0; }
+
+/* Экран конца игры */
+#end-screen {
+    background: rgba(0,0,0,0.85);
+    align-items: center;
+    justify-content: center;
+    z-index: 30;
+}
+
+#end-title {
+    font-size: 64px;
+    font-weight: bold;
+    margin-bottom: 30px;
+    letter-spacing: 5px;
+}
+
+.restart-btn {
+    background: #2b6cb0;
+    color: #fff;
+    border: none;
+    padding: 12px 30px;
+    font-size: 18px;
+    font-weight: bold;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.restart-btn:hover { background: #3182ce; }
