@@ -4480,7 +4480,7 @@ class Game {
                 ctx.fill();
                 ctx.restore();
             } else if (e.type === 'teleport_arrive') {
-                ctx.save();
+                ctx.save(); 
                 ctx.fillStyle = 'rgba(125, 211, 252, 0.4)';
                 ctx.beginPath();
                 ctx.arc(e.x - this.camera.x, e.y - this.camera.y, e.radius || 40, 0, Math.PI * 2);
