@@ -66,21 +66,21 @@ window.addEventListener('contextmenu', e => e.preventDefault());
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 
 // ----------------------------------------------
-// КАРТА С ТРЁМЯ ЛИНИЯМИ (Dota 2 стиль)
+// КАРТА (уменьшена на 25%: 6000x4500)
 // ----------------------------------------------
 class GameMap {
     constructor() {
-        this.width = 8000;
-        this.height = 6000;
+        this.width = 6000;
+        this.height = 4500;
         // Базы
-        this.radiantBase = { x: 500, y: 5500 };
-        this.direBase = { x: 7500, y: 1000 };
+        this.radiantBase = { x: 375, y: 4125 };
+        this.direBase = { x: 5625, y: 750 };
         // Waypoints для каждой линии (от Radiant к Dire)
         this.waypoints = {
             top: [
                 { x: this.radiantBase.x, y: this.radiantBase.y },
-                { x: this.radiantBase.x, y: 1000 },
-                { x: this.direBase.x, y: 1000 }
+                { x: this.radiantBase.x, y: 750 },
+                { x: this.direBase.x, y: 750 }
             ],
             mid: [
                 { x: this.radiantBase.x, y: this.radiantBase.y },
@@ -88,15 +88,15 @@ class GameMap {
             ],
             bottom: [
                 { x: this.radiantBase.x, y: this.radiantBase.y },
-                { x: 7500, y: this.radiantBase.y },
+                { x: 5625, y: this.radiantBase.y },
                 { x: this.direBase.x, y: this.direBase.y }
             ]
         };
         // Обратные маршруты для Dire
         this.waypointsReverse = {
             top: [
-                { x: this.direBase.x, y: 1000 },
-                { x: this.radiantBase.x, y: 1000 },
+                { x: this.direBase.x, y: 750 },
+                { x: this.radiantBase.x, y: 750 },
                 { x: this.radiantBase.x, y: this.radiantBase.y }
             ],
             mid: [
@@ -105,7 +105,7 @@ class GameMap {
             ],
             bottom: [
                 { x: this.direBase.x, y: this.direBase.y },
-                { x: 7500, y: this.radiantBase.y },
+                { x: 5625, y: this.radiantBase.y },
                 { x: this.radiantBase.x, y: this.radiantBase.y }
             ]
         };
@@ -117,11 +117,9 @@ class GameMap {
     }
 
     generateDecorations() {
-        // Добавим деревья вдоль линий
         const lanes = ['top', 'mid', 'bottom'];
         for (let lane of lanes) {
             const wps = this.waypoints[lane];
-            // Проходим по отрезкам между waypoints
             for (let i = 0; i < wps.length - 1; i++) {
                 const from = wps[i];
                 const to = wps[i+1];
@@ -131,8 +129,8 @@ class GameMap {
                     const x = from.x + (to.x - from.x) * t;
                     const y = from.y + (to.y - from.y) * t;
                     if (Math.random() < 0.15) {
-                        const offsetX = (Math.random() - 0.5) * 120;
-                        const offsetY = (Math.random() - 0.5) * 120;
+                        const offsetX = (Math.random() - 0.5) * 90;
+                        const offsetY = (Math.random() - 0.5) * 90;
                         this.decorations.push({
                             x: x + offsetX,
                             y: y + offsetY,
@@ -143,17 +141,17 @@ class GameMap {
                 }
             }
         }
-        // Деревья в базах
+        // Деревья в базах (масштабированы)
         for (let i = 0; i < 30; i++) {
             this.decorations.push({
-                x: 200 + Math.random() * 400,
-                y: 5300 + Math.random() * 400,
+                x: 150 + Math.random() * 300,
+                y: 3975 + Math.random() * 300,
                 type: 'tree',
                 size: 80 + Math.random() * 80
             });
             this.decorations.push({
-                x: 7400 + Math.random() * 400,
-                y: 800 + Math.random() * 400,
+                x: 5550 + Math.random() * 300,
+                y: 600 + Math.random() * 300,
                 type: 'tree',
                 size: 80 + Math.random() * 80
             });
@@ -181,11 +179,9 @@ class GameMap {
     }
 
     draw(ctx, camera) {
-        // Фон
         ctx.fillStyle = '#1e2d1a';
         ctx.fillRect(-camera.x, -camera.y, this.width, this.height);
 
-        // Рисуем дорожки линий
         const laneColors = ['#3a5a3a', '#4a6a4a', '#3a5a3a'];
         const lanes = ['top', 'mid', 'bottom'];
         for (let idx = 0; idx < lanes.length; idx++) {
@@ -208,18 +204,16 @@ class GameMap {
             ctx.stroke();
         }
 
-        // Базы (квадраты)
+        // Базы
         ctx.fillStyle = '#2a4a2a';
-        ctx.fillRect(200 - camera.x, 5300 - camera.y, 600, 400);
+        ctx.fillRect(150 - camera.x, 3975 - camera.y, 450, 300);
         ctx.fillStyle = '#4a2a2a';
-        ctx.fillRect(7200 - camera.x, 800 - camera.y, 600, 400);
+        ctx.fillRect(5400 - camera.x, 600 - camera.y, 450, 300);
 
-        // Деревья
         for (let deco of this.decorations) {
             this.drawDecoration(ctx, deco, camera);
         }
 
-        // Границы карты
         ctx.strokeStyle = '#2d4a2d';
         ctx.lineWidth = 4;
         ctx.strokeRect(-camera.x, -camera.y, this.width, this.height);
@@ -346,7 +340,7 @@ class Inventory {
 }
 
 // ----------------------------------------------
-// БАЗОВЫЙ КЛАСС СУЩНОСТИ
+// БАЗОВЫЙ КЛАСС СУЩНОСТИ (с обновлёнными границами)
 // ----------------------------------------------
 class Entity {
     constructor(x, y, team, radius, hp, damage, speed) {
@@ -363,30 +357,24 @@ class Entity {
         this.burningSpears = [];
         this.nasalGooEffects = [];
         this.quillStacks = [];
-        // Для движения по маршруту
         this.waypoints = null;
         this.currentWaypointIndex = 0;
         this.isMovingToWaypoint = false;
-        // Защита от зависания
         this._stuckCheckTimer = 0;
         this._lastPos = { x: this.x, y: this.y };
         this._stuckTime = 0;
-        // Для Counterspell
         this.counterspellActive = false;
         this.counterspellTimer = 0;
     }
 
-    // Проверка, можно ли атаковать эту цель
     isAttackable() {
         return !this.isDead;
     }
 
     takeDamage(amount, attacker, isFb = false, damageType = 'physical') {
         if (this.isDead) return;
-        // Запрет атаки своих
         if (attacker && attacker.team === this.team) return;
 
-        // Башенный агро: если герой атакует героя под башней
         if (attacker instanceof Hero && this instanceof Hero && attacker.team !== this.team) {
             const towers = game.towers.filter(t => t.team === this.team && !t.isDead);
             for (let t of towers) {
@@ -555,10 +543,9 @@ class Entity {
                 this.y += (dy / dist) * step;
             }
         } else if (!this.attackTarget) {
-            // Остановились у цели или достигли waypoint
+            // остановились
         }
 
-        // Защита от зависания – проверяем, двигается ли сущность
         this._stuckCheckTimer += dt;
         if (this._stuckCheckTimer > 2.0) {
             this._stuckCheckTimer = 0;
@@ -568,7 +555,6 @@ class Entity {
             if (dist2 < 5 && !this.isDead && !this.attackTarget && this.speed > 0.1) {
                 this._stuckTime += 2.0;
                 if (this._stuckTime > 5.0) {
-                    // Принудительно пересчитать цель: если есть waypoints, перейти к следующему
                     if (this.waypoints && this.waypoints.length > 0) {
                         this.currentWaypointIndex = Math.min(this.currentWaypointIndex + 1, this.waypoints.length - 1);
                         this.targetX = this.waypoints[this.currentWaypointIndex].x;
@@ -582,6 +568,10 @@ class Entity {
             this._lastPos.x = this.x;
             this._lastPos.y = this.y;
         }
+
+        // Ограничения по карте
+        this.x = Math.max(0, Math.min(game.map.width, this.x));
+        this.y = Math.max(0, Math.min(game.map.height, this.y));
     }
 
     drawHealthBar(ctx, camera) {
@@ -601,7 +591,7 @@ class Entity {
 }
 
 // ----------------------------------------------
-// ГЕРОИ
+// ГЕРОИ (с обновлёнными границами)
 // ----------------------------------------------
 class Hero extends Entity {
     constructor(x, y, team, name) {
@@ -612,13 +602,12 @@ class Hero extends Entity {
         this.hpRegenBase = 2.0; this.mpRegenBase = 1.5; this.invulnerable = false;
         this.inventoryHpRegen = 0; this.inventoryManaRegen = 0;
         this.isHealingAtFountain = false;
-        this.radianceTimer = 0; // для ауры Radiance
-        this.passiveGoldTimer = 0; // для накопления золота
+        this.radianceTimer = 0;
+        this.passiveGoldTimer = 0;
 
-        // --- Телепорт ---
-        this.teleportCharges = 0; // получает заряд только после смерти
+        this.teleportCharges = 0;
         this.isChannelingTeleport = false;
-        this.teleportTarget = null; // ссылка на башню (Tower)
+        this.teleportTarget = null;
         this.teleportChannelTimer = 0;
         this.teleportStartX = 0;
         this.teleportStartY = 0;
@@ -626,7 +615,6 @@ class Hero extends Entity {
 
     getHpRegen() {
         let regen = this.hpRegenBase + (this.inventoryHpRegen || 0);
-        // Пассивка Heart of Tarrasque: Behemoth's Blood
         if (this.inventory) {
             const heart = this.inventory.items.find(item => item.id === 'heart');
             if (heart) {
@@ -644,19 +632,16 @@ class Hero extends Entity {
         if (this.isDead) return false;
         if (this.teleportCharges <= 0) return false;
         if (!tower || tower.isDead || tower.team !== this.team) return false;
-        // Отменить предыдущий канал, если был
         this.cancelTeleport('new');
         this.isChannelingTeleport = true;
         this.teleportTarget = tower;
         this.teleportChannelTimer = 5.0;
         this.teleportStartX = this.x;
         this.teleportStartY = this.y;
-        // Остановить движение и атаку
         this.attackTarget = null;
         this.targetX = this.x;
         this.targetY = this.y;
         this.isMovingToWaypoint = false;
-        // Уведомление
         if (game && game.uiManager) {
             game.uiManager.addFloatingText(this.x, this.y - 40, '📡 Teleporting...', '#7dd3fc');
         }
@@ -674,9 +659,9 @@ class Hero extends Entity {
             } else if (reason === 'ability') {
                 game.uiManager.addFloatingText(this.x, this.y - 40, '❌ Teleport cancelled (ability used)', '#ff6666');
             } else if (reason === 'death') {
-                // не показываем, т.к. герой умер
+                // не показываем
             } else if (reason === 'new') {
-                // новый телепорт начался, старый отменён
+                // новый телепорт начался
             } else {
                 game.uiManager.addFloatingText(this.x, this.y - 40, '❌ Teleport cancelled', '#ff6666');
             }
@@ -689,20 +674,17 @@ class Hero extends Entity {
             this.cancelTeleport('death');
             return;
         }
-        // Проверка движения
         const distMoved = Math.hypot(this.x - this.teleportStartX, this.y - this.teleportStartY);
         if (distMoved > 5) {
             this.cancelTeleport('move');
             return;
         }
-        // Проверка цели
         if (!this.teleportTarget || this.teleportTarget.isDead || this.teleportTarget.team !== this.team) {
             this.cancelTeleport('target lost');
             return;
         }
         this.teleportChannelTimer -= dt;
         if (this.teleportChannelTimer <= 0) {
-            // Телепорт завершён
             this.finishTeleport();
         }
     }
@@ -714,25 +696,23 @@ class Hero extends Entity {
             this.cancelTeleport('target lost');
             return;
         }
-        // Переносим героя рядом с башней
         const angle = Math.random() * Math.PI * 2;
         const distance = 50 + this.radius + tower.radius;
-        const tx = tower.x + Math.cos(angle) * distance;
-        const ty = tower.y + Math.sin(angle) * distance;
-        this.x = Math.max(0, Math.min(8000, tx));
-        this.y = Math.max(0, Math.min(6000, ty));
+        let tx = tower.x + Math.cos(angle) * distance;
+        let ty = tower.y + Math.sin(angle) * distance;
+        tx = Math.max(0, Math.min(game.map.width, tx));
+        ty = Math.max(0, Math.min(game.map.height, ty));
+        this.x = tx;
+        this.y = ty;
         this.targetX = this.x;
         this.targetY = this.y;
-        // Убираем заряд
         this.teleportCharges = Math.max(0, this.teleportCharges - 1);
-        // Сбрасываем состояние
         this.isChannelingTeleport = false;
         this.teleportTarget = null;
         this.teleportChannelTimer = 0;
         if (game && game.uiManager) {
             game.uiManager.addFloatingText(this.x, this.y - 30, '✅ Teleported!', '#7dd3fc');
         }
-        // Визуальный эффект
         if (game) {
             game.effects.push({ type: 'teleport_arrive', x: this.x, y: this.y, life: 0.5, radius: 40, team: this.team });
         }
@@ -748,17 +728,17 @@ class Hero extends Entity {
             }
         }
 
-        // --- ДАЁМ ТЕЛЕПОРТ ПОСЛЕ СМЕРТИ (1 заряд) ---
         this.teleportCharges = Math.min(1, this.teleportCharges + 1);
-        // Отменить канал, если был
         this.cancelTeleport('death');
 
         setTimeout(() => {
             this.isDead = false; this.hp = this.maxHp; this.mp = this.maxMp;
             if (this.team === 'radiant') {
-                this.x = 500; this.y = 5500;
+                this.x = game.map.radiantBase.x;
+                this.y = game.map.radiantBase.y;
             } else {
-                this.x = 7500; this.y = 1000;
+                this.x = game.map.direBase.x;
+                this.y = game.map.direBase.y;
             }
             this.targetX = this.x; this.targetY = this.y; this.attackTarget = null;
             if (this instanceof Sniper) {
@@ -789,7 +769,6 @@ class Hero extends Entity {
 
     update(dt) {
         if (this.isDead) return;
-        // Обновляем телепорт (канал) до всего остального, чтобы прервать при необходимости
         this.updateTeleport(dt);
 
         this.updateBuffs(dt);
@@ -832,7 +811,6 @@ class Hero extends Entity {
             this.linkensCooldown = Math.max(0, this.linkensCooldown - dt);
         }
 
-        // --- Radiance Aura ---
         if (this.inventory) {
             const radianceItem = this.inventory.items.find(item => item.id === 'radiance');
             if (radianceItem) {
@@ -869,7 +847,6 @@ class Hero extends Entity {
             this.cancelTeleport('ability');
             return;
         }
-        // Проверка промаха от Radiance у цели
         if (this.attackTarget && this.attackTarget.inventory) {
             const radianceItem = this.attackTarget.inventory.items.find(item => item.id === 'radiance');
             if (radianceItem) {
@@ -877,7 +854,7 @@ class Hero extends Entity {
                 if (d <= 500) {
                     if (Math.random() < 0.05) {
                         game.uiManager.addFloatingText(this.x, this.y - 20, "MISS", '#ff6666');
-                        return; // промах, атака не происходит
+                        return;
                     }
                 }
             }
@@ -947,11 +924,11 @@ class Hero extends Entity {
         this.drawTeleportBar(ctx, camera);
     }
 }
+
 // =========================================================================
-//  ГЕРОИ (наследники Hero)
+//  ГЕРОИ (наследники) – с обновлёнными границами
 // =========================================================================
 
-// ----- Morphling -----
 class Morphling extends Hero {
     constructor(x, y, team) {
         super(x, y, team, 'Morphling');
@@ -1012,7 +989,8 @@ class Morphling extends Hero {
     update(dt) {
         if (this.waveformTimer > 0) {
             this.waveformTimer -= dt; this.x += this.wdx * dt; this.y += this.wdy * dt;
-            this.x = Math.max(0, Math.min(8000, this.x)); this.y = Math.max(0, Math.min(6000, this.y));
+            this.x = Math.max(0, Math.min(game.map.width, this.x));
+            this.y = Math.max(0, Math.min(game.map.height, this.y));
             let enemies = this.team === 'radiant' ? game.direEntities() : game.direEntities();
             for (let e of enemies) {
                 if (!this.wHits.includes(e) && Math.hypot(e.x - this.x, e.y - this.y) < 65) {
@@ -1115,8 +1093,8 @@ class AdaptiveStrikeProjectile {
             let pushDist = 80;
             this.target.x += Math.cos(pushAng) * pushDist;
             this.target.y += Math.sin(pushAng) * pushDist;
-            this.target.x = Math.max(0, Math.min(8000, this.target.x));
-            this.target.y = Math.max(0, Math.min(6000, this.target.y));
+            this.target.x = Math.max(0, Math.min(game.map.width, this.target.x));
+            this.target.y = Math.max(0, Math.min(game.map.height, this.target.y));
             this.target.targetX = this.target.x; this.target.targetY = this.target.y;
         } else {
             this.x += (dx / dist) * this.speed * dt;
@@ -1137,7 +1115,7 @@ class AdaptiveStrikeProjectile {
     }
 }
 
-// ----- Warlock -----
+// ----- Warlock (без изменений, кроме границ) -----
 class Warlock extends Hero {
     constructor(x, y, team) {
         super(x, y, team, 'Warlock'); this.attackRange = 380;
@@ -1709,7 +1687,7 @@ class Huskar extends Hero {
         this.maxHp = 700; this.hp = 700;
         this.maxMp = 0; this.mp = 0; this.mpRegenBase = 0;
         this.baseStrength = 40;
-        this.attackRange = 400;
+        this.attackRange = 300;
         this.burningSpearActive = false;
         this.lifeBreakTarget = null;
 
@@ -1750,9 +1728,9 @@ class Huskar extends Hero {
         }
         else if (idx === 3 && this.abilities[3].currentCooldown <= 0) {
             let enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
-            let target = this.attackTarget || enemies.find(e => Math.hypot(e.x - this.x, e.y - this.y) <= 500);
+            let target = this.attackTarget || enemies.find(e => Math.hypot(e.x - this.x, e.y - this.y) <= 300);
             if (target && target.blockSpell && target.blockSpell(this)) return;
-            if (target && Math.hypot(target.x - this.x, target.y - this.y) <= 500) {
+            if (target && Math.hypot(target.x - this.x, target.y - this.y) <= 300) {
                 this.hp -= this.hp * 0.35;
                 this.abilities[3].currentCooldown = this.abilities[3].maxCooldown;
                 this.lifeBreakTarget = target;
@@ -1825,9 +1803,9 @@ class Huskar extends Hero {
 class AntiMage extends Hero {
     constructor(x, y, team) {
         super(x, y, team, 'Anti-Mage');
-        this.maxHp = 800;
-        this.hp = 800;
-        this.damage = 58;
+        this.maxHp = 750;
+        this.hp = 750;
+        this.damage = 55;
         this.baseSpeed = 260;
         this.speed = 260;
         this.attackRange = 100;
@@ -1887,8 +1865,8 @@ class AntiMage extends Hero {
                 let step = 600 / dist;
                 let newX = this.x + dx * step;
                 let newY = this.y + dy * step;
-                newX = Math.max(0, Math.min(8000, newX));
-                newY = Math.max(0, Math.min(6000, newY));
+                newX = Math.max(0, Math.min(game.map.width, newX));
+                newY = Math.max(0, Math.min(game.map.height, newY));
                 this.x = newX;
                 this.y = newY;
                 this.targetX = newX;
@@ -1973,18 +1951,17 @@ class AntiMage extends Hero {
 }
 
 // =========================================================================
-//  НОВЫЙ ГЕРОЙ: BROODMOTHER
+//  BROODMOTHER (с обновлёнными границами)
 // =========================================================================
 
 class Broodmother extends Hero {
     constructor(x, y, team) {
         super(x, y, team, 'Broodmother');
-        // Переопределяем статы
-        this.maxHp = 650;
-        this.hp = 650;
-        this.damage = 55;
+        this.maxHp = 700;
+        this.hp = 700;
+        this.damage = 58;
         this.baseSpeed = 295;
-        this.speed = 295;
+        this.speed = 305;
         this.attackRange = 140;
         this.attackSpeed = 1.2;
         this.maxMp = 300;
@@ -1992,47 +1969,40 @@ class Broodmother extends Hero {
         this.hpRegenBase = 2.0;
         this.mpRegenBase = 1.2;
 
-        // Способности
         this.abilities.push(new Ability('Insatiable Hunger', 'active', 30, 30, 'Gain +40% damage and 40% lifesteal for 8 seconds. Also affects spiderlings.'));
         this.abilities.push(new Ability('Spin Web', 'active', 10, 35, 'Create a web at target location. Grants +30% speed while inside. Max 3 webs.'));
         this.abilities.push(new Ability('Incapacitating Bite', 'passive', 0, 0, 'Attacks slow enemy by 15%, give 30% miss chance, and +3 damage taken for 2 seconds.'));
         this.abilities.push(new Ability('Spawn Spiderlings', 'active', 9, 60, 'Deals 220 magic damage to target, slows 25% for 4 sec. If target dies while debuffed, spawn 4 spiderlings.'));
 
-        // Состояния для способностей
         this.hungerActive = false;
         this.hungerTimer = 0;
         this.hungerDamageMult = 1.4;
         this.hungerLifesteal = 0.4;
         this.hungerDuration = 8;
 
-        this.webs = []; // массив паутин {x, y, radius}
+        this.webs = [];
         this.maxWebs = 3;
         this.webRadius = 150;
         this.webSpeedBonus = 0.30;
 
-        this.spiderlings = []; // массив призванных паучков
-        this.spiderDebuffs = []; // эффекты на врагах {target, timer}
+        this.spiderlings = [];
+        this.spiderDebuffs = [];
 
-        // Для AI
         this._aiWebTimer = 0;
         this._aiHungerTimer = 0;
         this._aiSpiderTimer = 0;
     }
 
-    // ---------- Q: Insatiable Hunger ----------
     useInsatiableHunger() {
         if (this.isDead || this.silenceTimer > 0) return false;
         if (this.abilities[0].currentCooldown > 0 || this.mp < this.abilities[0].manaCost) return false;
-        // Затраты
         this.mp -= this.abilities[0].manaCost;
         this.abilities[0].currentCooldown = this.abilities[0].maxCooldown;
         audio.play('ability');
 
         this.hungerActive = true;
         this.hungerTimer = this.hungerDuration;
-        // Применяем к себе
         this.damage = Math.floor(this.damage * this.hungerDamageMult);
-        // Для паучков тоже обновим
         this.updateSpiderlingsHunger();
         game.uiManager.addFloatingText(this.x, this.y - 30, 'INSATIABLE HUNGER!', '#ff6666');
         return true;
@@ -2043,9 +2013,7 @@ class Broodmother extends Hero {
             this.hungerTimer -= dt;
             if (this.hungerTimer <= 0) {
                 this.hungerActive = false;
-                // Возвращаем урон
                 this.damage = Math.floor(this.damage / this.hungerDamageMult);
-                // Обновляем паучков
                 this.updateSpiderlingsHunger();
                 game.uiManager.addFloatingText(this.x, this.y - 30, 'Hunger fades', '#aaaaaa');
             }
@@ -2065,14 +2033,11 @@ class Broodmother extends Hero {
         }
     }
 
-    // ---------- W: Spin Web ----------
     useSpinWeb(targetX, targetY) {
         if (this.isDead || this.silenceTimer > 0) return false;
         if (this.abilities[1].currentCooldown > 0 || this.mp < this.abilities[1].manaCost) return false;
 
-        // Проверяем, можно ли создать паутину в указанной точке
         const radius = this.webRadius;
-        // Проверка касания с существующими паутинами
         let touchesExisting = false;
         for (let w of this.webs) {
             const dist = Math.hypot(w.x - targetX, w.y - targetY);
@@ -2081,7 +2046,6 @@ class Broodmother extends Hero {
                 break;
             }
         }
-        // Если не касается, то можно создавать только рядом с Broodmother
         if (!touchesExisting) {
             const distToHero = Math.hypot(this.x - targetX, this.y - targetY);
             if (distToHero > 200) {
@@ -2090,14 +2054,11 @@ class Broodmother extends Hero {
             }
         }
 
-        // Затраты
         this.mp -= this.abilities[1].manaCost;
         this.abilities[1].currentCooldown = this.abilities[1].maxCooldown;
         audio.play('ability');
 
-        // Добавляем паутину
         this.webs.push({ x: targetX, y: targetY, radius: radius });
-        // Если больше максимума, удаляем самую старую
         if (this.webs.length > this.maxWebs) {
             this.webs.shift();
         }
@@ -2115,10 +2076,8 @@ class Broodmother extends Hero {
         return 0;
     }
 
-    // ---------- E: Incapacitating Bite (пассив) ----------
     applyIncapacitatingBite(target) {
         if (!target || target.isDead) return;
-        // Эффект уже есть? обновим
         let existing = target._incapacitatingBite;
         if (existing) {
             existing.timer = 2.0;
@@ -2132,9 +2091,7 @@ class Broodmother extends Hero {
         }
     }
 
-    // Обновление эффектов Incapacitating Bite (вызывается в update)
     updateIncapacitatingBite(dt) {
-        // Ищем всех врагов с эффектом
         const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
         for (let e of enemies) {
             if (e._incapacitatingBite) {
@@ -2146,7 +2103,6 @@ class Broodmother extends Hero {
         }
     }
 
-    // Переопределяем performAttack для применения яда
     performAttack() {
         if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
         this.attackCooldown = this.attackSpeed;
@@ -2162,44 +2118,33 @@ class Broodmother extends Hero {
             if (item.stats?.critMultiplier) critMultiplier = Math.max(critMultiplier, item.stats.critMultiplier);
         }
 
-        // Создаём снаряд, но сразу применяем эффект (для ближнего боя)
         const target = this.attackTarget;
         if (target && !target.isDead && target.team !== this.team) {
-            // Применяем Incapacitating Bite
             this.applyIncapacitatingBite(target);
-            // Также дополнительный урон от яда (bonusDamageTaken) применяем в takeDamage через проверку эффекта
         }
 
         let proj = new Projectile(this.x, this.y, this.attackTarget, finalDamage, this.team, this);
-        proj.isBroodmotherAttack = true; // пометка для обработки
+        proj.isBroodmotherAttack = true;
         if (Math.random() < critChance) {
             proj.isCrit = true;
             proj.damage = Math.max(1, proj.damage * critMultiplier);
         }
         game.projectiles.push(proj);
-
-        // Если Hunger активен, высасываем жизнь (lifesteal) - обработаем в проектеле
     }
 
-    // ---------- R: Spawn Spiderlings ----------
     useSpawnSpiderlings(target) {
         if (this.isDead || this.silenceTimer > 0) return false;
         if (this.abilities[3].currentCooldown > 0 || this.mp < this.abilities[3].manaCost) return false;
         if (!target || target.isDead || target.team === this.team) return false;
-        // Проверка дистанции (каст дальний ~ 500)
         const dist = Math.hypot(target.x - this.x, target.y - this.y);
         if (dist > 500) return false;
 
-        // Затраты
         this.mp -= this.abilities[3].manaCost;
         this.abilities[3].currentCooldown = this.abilities[3].maxCooldown;
         audio.play('ability');
 
-        // Наносим урон
         target.takeDamage(220, this, false, 'magic');
-        // Замедление
-        target.slowTimer = Math.max(target.slowTimer || 0, 4.0); // замедление на 25% (уже есть система slowTimer = 0.25)
-        // Накладываем дебафф
+        target.slowTimer = Math.max(target.slowTimer || 0, 4.0);
         this.spiderDebuffs.push({ target: target, timer: 4.0 });
 
         game.uiManager.addFloatingText(target.x, target.y - 30, '🕷️ Eggs!', '#ff66ff');
@@ -2211,14 +2156,11 @@ class Broodmother extends Hero {
             let debuff = this.spiderDebuffs[i];
             debuff.timer -= dt;
             if (debuff.timer <= 0) {
-                // Проверяем, жив ли target
                 if (debuff.target && debuff.target.isDead) {
-                    // Создаём паучков
                     this.spawnSpiderlings(debuff.target.x, debuff.target.y);
                 }
                 this.spiderDebuffs.splice(i, 1);
             } else {
-                // Если цель умерла до истечения таймера — создаём паучков и удаляем дебафф
                 if (debuff.target && debuff.target.isDead) {
                     this.spawnSpiderlings(debuff.target.x, debuff.target.y);
                     this.spiderDebuffs.splice(i, 1);
@@ -2235,38 +2177,27 @@ class Broodmother extends Hero {
             const sx = x + Math.cos(angle) * dist;
             const sy = y + Math.sin(angle) * dist;
             const spider = new Spiderling(sx, sy, this.team, this);
-            // Если Hunger активен, сразу даём бонус
             if (this.hungerActive) {
                 spider.damage = Math.floor(spider.baseDamage * this.hungerDamageMult);
                 spider.hungerLifesteal = this.hungerLifesteal;
             }
             this.spiderlings.push(spider);
-            game.creeps.push(spider); // добавляем в глобальный список крипов, чтобы они обновлялись и отрисовывались
+            game.creeps.push(spider);
         }
         game.uiManager.addFloatingText(x, y - 20, '🕷️ Spiderlings!', '#ff66ff');
     }
 
-    // Переопределяем update для управления паучками и состояниями
     update(dt) {
         if (this.isDead) return;
-        // Обновляем телепорт
         this.updateTeleport(dt);
-        // Обновляем баффы
         this.updateBuffs(dt);
-        // Реген
         if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.getHpRegen() * dt);
         if (this.maxMp > 0 && this.mp < this.maxMp) this.mp = Math.min(this.maxMp, this.mp + this.getMpRegen() * dt);
 
-        // Обновляем Hunger
         this.updateHunger(dt);
-
-        // Обновляем эффекты Incapacitating Bite
         this.updateIncapacitatingBite(dt);
-
-        // Обновляем дебаффы Spawn Spiderlings
         this.updateSpiderDebuffs(dt);
 
-        // Бонус скорости от паутины
         let webBonus = this.getWebSpeedBonus();
         if (webBonus > 0) {
             this.speed = this.baseSpeed * (1 + webBonus);
@@ -2274,7 +2205,6 @@ class Broodmother extends Hero {
             this.speed = this.baseSpeed;
         }
 
-        // Движение и атака
         this.updateMovement(dt);
         let rate = 1.0;
         if (this.headshotSlowTimer > 0) rate *= 0.5;
@@ -2289,10 +2219,8 @@ class Broodmother extends Hero {
             this.attackTarget = null;
         }
 
-        // Обновляем способности (кулдауны)
         for (let ab of this.abilities) ab.update(dt);
 
-        // Обновляем паучков (они в game.creeps, но мы также храним ссылки)
         for (let i = this.spiderlings.length - 1; i >= 0; i--) {
             const s = this.spiderlings[i];
             if (s.isDead || s.lifeTime <= 0) {
@@ -2301,7 +2229,6 @@ class Broodmother extends Hero {
         }
     }
 
-    // Переопределим useAbility для вызова нужных методов
     useAbility(idx) {
         if (this.isDead || this.silenceTimer > 0) return;
         if (this.isChannelingTeleport) { this.cancelTeleport('ability'); }
@@ -2309,7 +2236,6 @@ class Broodmother extends Hero {
         if (idx === 0) {
             this.useInsatiableHunger();
         } else if (idx === 1) {
-            // Направленная на точку: используем позицию цели или мыши
             let tx = this.targetX;
             let ty = this.targetY;
             if (this.attackTarget) {
@@ -2318,7 +2244,7 @@ class Broodmother extends Hero {
             }
             this.useSpinWeb(tx, ty);
         } else if (idx === 2) {
-            // Пассивная, ничего не делаем
+            // пассив
         } else if (idx === 3) {
             let target = this.attackTarget;
             if (!target || target.isDead || target.team === this.team) {
@@ -2333,7 +2259,6 @@ class Broodmother extends Hero {
         }
     }
 
-    // Отрисовка паутин
     drawWebs(ctx, camera) {
         for (let w of this.webs) {
             const sx = w.x - camera.x;
@@ -2347,7 +2272,6 @@ class Broodmother extends Hero {
             ctx.arc(sx, sy, w.radius, 0, Math.PI * 2);
             ctx.fill();
             ctx.stroke();
-            // Рисуем паутину (линии)
             ctx.globalAlpha = 0.2;
             ctx.strokeStyle = '#ffffff';
             ctx.lineWidth = 0.5;
@@ -2364,10 +2288,8 @@ class Broodmother extends Hero {
 
     draw(ctx, camera) {
         if (this.isDead) return;
-        // Рисуем паутины под героем
         this.drawWebs(ctx, camera);
         super.draw(ctx, camera);
-        // Если Hunger активен — подсветка
         if (this.hungerActive) {
             let sx = this.x - camera.x;
             let sy = this.y - camera.y;
@@ -2383,7 +2305,7 @@ class Broodmother extends Hero {
 }
 
 // =========================================================================
-//  ПРИЗЫВАЕМЫЕ ПАУЧКИ (Spiderling)
+//  ПРИЗЫВАЕМЫЕ ПАУЧКИ
 // =========================================================================
 
 class Spiderling extends Entity {
@@ -2398,14 +2320,12 @@ class Spiderling extends Entity {
         this.hungerLifesteal = 0;
         this.attackCooldown = 0;
         this._targetCheckTimer = 0;
-        // Паучки не используют waypoints, они свободно передвигаются
         this.waypoints = null;
         this.isMovingToWaypoint = false;
     }
 
     findTarget() {
         const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
-        // Приоритет: Герои -> Крипы -> Башни -> Остальные
         let best = null;
         let bestScore = -Infinity;
         const attackRange = this.attackRange * 1.5;
@@ -2419,7 +2339,6 @@ class Spiderling extends Entity {
             else if (e instanceof Tower) score = 30;
             else if (e instanceof Ancient) score = 20;
             else score = 10;
-            // Чем ближе, тем выше приоритет
             score -= dist * 0.1;
             if (score > bestScore) {
                 bestScore = score;
@@ -2456,12 +2375,10 @@ class Spiderling extends Entity {
             if (d <= this.attackRange && this.attackCooldown <= 0) {
                 this.performAttack();
             } else {
-                // Двигаемся к цели
                 this.targetX = this.attackTarget.x;
                 this.targetY = this.attackTarget.y;
             }
         } else {
-            // Если нет цели, двигаемся к владельцу (Broodmother)
             if (this.owner && !this.owner.isDead) {
                 this.targetX = this.owner.x;
                 this.targetY = this.owner.y;
@@ -2474,10 +2391,7 @@ class Spiderling extends Entity {
         if (!this.attackTarget || this.attackTarget.isDead) return;
         this.attackCooldown = this.attackSpeed;
         let damage = this.damage;
-        // Если есть бонус от Hunger
         if (this.hungerLifesteal > 0) {
-            // наносим урон, а затем лечим владельца (или себя?)
-            // Лечим владельца (Broodmother)
             const target = this.attackTarget;
             target.takeDamage(damage, this);
             if (this.owner && !this.owner.isDead) {
@@ -2511,8 +2425,9 @@ class Spiderling extends Entity {
         this.drawHealthBar(ctx, camera);
     }
 }
+
 // =========================================================================
-//  ВСПОМОГАТЕЛЬНЫЕ КЛАССЫ (продолжение)
+//  ВСПОМОГАТЕЛЬНЫЕ КЛАССЫ (с обновлёнными границами)
 // =========================================================================
 
 class ShrapnelZone {
@@ -3046,7 +2961,6 @@ class Projectile {
         let dy = this.target.y - this.y;
         let dist = Math.hypot(dx, dy);
         if (dist < 12) {
-            // Обработка особых эффектов
             if (this.isManaBreak && this.attacker instanceof AntiMage) {
                 const target = this.target;
                 if (target.maxMp > 0) {
@@ -3072,8 +2986,8 @@ class Projectile {
                     let pushDistance = 35;
                     this.target.x += (dx / dist) * pushDistance;
                     this.target.y += (dy / dist) * pushDistance;
-                    this.target.x = Math.max(50, Math.min(7950, this.target.x));
-                    this.target.y = Math.max(50, Math.min(5950, this.target.y));
+                    this.target.x = Math.max(50, Math.min(game.map.width - 50, this.target.x));
+                    this.target.y = Math.max(50, Math.min(game.map.height - 50, this.target.y));
                 }
                 
                 game.uiManager.addFloatingText(this.target.x, this.target.y - 30, "HEADSHOT", '#ffa500');
@@ -3085,15 +2999,12 @@ class Projectile {
                 if (!this.target.burningSpears) this.target.burningSpears = [];
                 this.target.burningSpears.push({ duration: 9.0, tickTimer: 0, attacker: this.attacker });
             }
-            // Обработка урона
             let finalDamage = this.damage;
-            // Проверка Incapacitating Bite (Broodmother) — дополнительный урон
             if (this.isBroodmotherAttack && this.target._incapacitatingBite) {
                 finalDamage += this.target._incapacitatingBite.bonusDamageTaken;
             }
             this.target.takeDamage(finalDamage, this.attacker);
             
-            // Лучший эффект для Broodmother (Hunger)
             if (this.isBroodmotherAttack && this.attacker instanceof Broodmother && this.attacker.hungerActive) {
                 const heal = this.damage * 0.4;
                 this.attacker.hp = Math.min(this.attacker.maxHp, this.attacker.hp + heal);
@@ -3271,7 +3182,7 @@ class Barracks {
 }
 
 // =========================================================================
-//  ИИ БОТОВ (с телепортом и Broodmother)
+//  ИИ БОТОВ
 // =========================================================================
 
 class BotAI {
@@ -3321,7 +3232,6 @@ class BotAI {
         const hero = this.hero;
         if (hero.isDead) return;
 
-        // ===== КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: если герой каналит телепорт, НЕ ДЕЛАЕМ НИЧЕГО =====
         if (hero.isChannelingTeleport) {
             return;
         }
@@ -3342,25 +3252,20 @@ class BotAI {
             this.useTeleport();
         }
 
-        // Специфическая логика для Broodmother
         if (hero instanceof Broodmother) {
-            // Использовать W (паутину) если не в бою и кулдаун готов
             if (hero.abilities[1].currentCooldown <= 0 && hero.mp >= 35) {
                 this._aiWebTimer += dt;
                 if (this._aiWebTimer > 3.0) {
                     this._aiWebTimer = 0;
-                    // Создаём паутину рядом с героем или в точке цели
                     let tx = hero.x + (Math.random() - 0.5) * 300;
                     let ty = hero.y + (Math.random() - 0.5) * 300;
                     hero.useSpinWeb(tx, ty);
                 }
             }
-            // Использовать Q (Hunger) в бою
             if (hero.attackTarget && !hero.attackTarget.isDead && hero.attackTarget.team !== hero.team) {
                 if (hero.abilities[0].currentCooldown <= 0 && hero.mp >= 30 && !hero.hungerActive) {
                     hero.useInsatiableHunger();
                 }
-                // Использовать R (Spawn Spiderlings) по врагу
                 if (hero.abilities[3].currentCooldown <= 0 && hero.mp >= 60) {
                     const target = hero.attackTarget;
                     if (target && target.hp < target.maxHp * 0.5) {
@@ -3383,8 +3288,8 @@ class BotAI {
                     let step = 600 / dist;
                     let newX = hero.x + dx * step;
                     let newY = hero.y + dy * step;
-                    newX = Math.max(0, Math.min(8000, newX));
-                    newY = Math.max(0, Math.min(6000, newY));
+                    newX = Math.max(0, Math.min(game.map.width, newX));
+                    newY = Math.max(0, Math.min(game.map.height, newY));
                     hero.x = newX;
                     hero.y = newY;
                     hero.targetX = newX;
@@ -3663,7 +3568,7 @@ class BotAI {
 }
 
 // =========================================================================
-//  UI Менеджер
+//  UI Менеджер (миникарта обновлена)
 // =========================================================================
 
 class UIManager {
@@ -3819,22 +3724,23 @@ class UIManager {
         mCtx.fillStyle = '#151c12';
         mCtx.fillRect(0, 0, w, h);
 
+        const map = game.map;
         const lanes = ['top', 'mid', 'bottom'];
         for (let lane of lanes) {
-            const wps = game.map.waypoints[lane];
+            const wps = map.waypoints[lane];
             if (!wps || wps.length < 2) continue;
             mCtx.strokeStyle = '#3a5a3a';
             mCtx.lineWidth = 2;
             mCtx.beginPath();
             for (let wp of wps) {
-                const sx = (wp.x / 8000) * w;
-                const sy = (wp.y / 6000) * h;
+                const sx = (wp.x / map.width) * w;
+                const sy = (wp.y / map.height) * h;
                 mCtx.lineTo(sx, sy);
             }
             mCtx.stroke();
         }
 
-        const toM = (x, y) => ({ x: (x / 8000) * w, y: (y / 6000) * h });
+        const toM = (x, y) => ({ x: (x / map.width) * w, y: (y / map.height) * h });
 
         const player = game.playerHero;
         const isTeleportMode = player && player.isChannelingTeleport === false && player.teleportCharges > 0 && game._teleportSelectionMode;
@@ -3916,7 +3822,7 @@ class UIManager {
 }
 
 // =========================================================================
-//  ОСНОВНОЙ КЛАСС ИГРЫ
+//  ОСНОВНОЙ КЛАСС ИГРЫ (обновлены координаты)
 // =========================================================================
 
 class Game {
@@ -3948,8 +3854,8 @@ class Game {
         this.glyphShieldReduction = 0.4;
         this.waveNumber = 0;
         this.bountyRunes = [
-            new BountyRune(700, 5000),
-            new BountyRune(7300, 1500)
+            new BountyRune(525, 3750),
+            new BountyRune(5475, 1125)
         ];
         this.goldTimer = 0;
         this._teleportSelectionMode = false;
@@ -4030,32 +3936,32 @@ class Game {
         const laneData = {
             top: {
                 towers: {
-                    radiant: [{x: 500, y: 4400}, {x: 500, y: 2800}, {x: 500, y: 1400}],
-                    dire:    [{x: 1500, y: 1000}, {x: 3500, y: 1000}, {x: 5500, y: 1000}]
+                    radiant: [{x: 375, y: 3300}, {x: 375, y: 2100}, {x: 375, y: 1050}],
+                    dire:    [{x: 1125, y: 750}, {x: 2625, y: 750}, {x: 4125, y: 750}]
                 },
                 barracks: {
-                    radiant: {x: 500, y: 900},
-                    dire:    {x: 6500, y: 1000}
+                    radiant: {x: 375, y: 675},
+                    dire:    {x: 4875, y: 750}
                 }
             },
             mid: {
                 towers: {
-                    radiant: [{x: 3650, y: 3475}, {x: 2600, y: 4150}, {x: 1550, y: 4825}],
-                    dire:    [{x: 4350, y: 3025}, {x: 5400, y: 2350}, {x: 6450, y: 1675}]
+                    radiant: [{x: 2737.5, y: 2606.25}, {x: 1950, y: 3112.5}, {x: 1162.5, y: 3618.75}],
+                    dire:    [{x: 3262.5, y: 2268.75}, {x: 4050, y: 1762.5}, {x: 4837.5, y: 1256.25}]
                 },
                 barracks: {
-                    radiant: {x: 850, y: 5275},
-                    dire:    {x: 7150, y: 1225}
+                    radiant: {x: 637.5, y: 3956.25},
+                    dire:    {x: 5362.5, y: 918.75}
                 }
             },
             bottom: {
                 towers: {
-                    radiant: [{x: 2800, y: 5500}, {x: 5675, y: 5500}, {x: 7500, y: 4450}],
-                    dire:    [{x: 7500, y: 3500}, {x: 7500, y: 2500}, {x: 7500, y: 1500}]
+                    radiant: [{x: 2100, y: 4125}, {x: 4256.25, y: 4125}, {x: 5625, y: 3337.5}],
+                    dire:    [{x: 5625, y: 2625}, {x: 5625, y: 1875}, {x: 5625, y: 1125}]
                 },
                 barracks: {
-                    radiant: {x: 1500, y: 5500},
-                    dire:    {x: 7500, y: 1250}
+                    radiant: {x: 1125, y: 4125},
+                    dire:    {x: 5625, y: 937.5}
                 }
             }
         };
@@ -4174,9 +4080,6 @@ class Game {
             const wx = mouseX + this.camera.x;
             const wy = mouseY + this.camera.y;
 
-            // ---- Обработка клика по миникарте для телепорта (убрали отсюда, теперь отдельный обработчик) ----
-
-            // Обычный клик (движение/атака)
             if (this.bountyRunes) {
                 for (let rune of this.bountyRunes) {
                     if (rune.isClicked(wx, wy)) {
@@ -4231,32 +4134,28 @@ class Game {
             }
         });
 
-        // --- ОТДЕЛЬНЫЙ ОБРАБОТЧИК ДЛЯ МИНИКАРТЫ (ТЕЛЕПОРТ) ---
         document.getElementById('minimapCanvas').addEventListener('click', (e) => {
-            // Проверим режим телепорта
             if (!this._teleportSelectionMode || !this.playerHero || this.playerHero.isDead || this.playerHero.teleportCharges <= 0 || this.playerHero.isChannelingTeleport) {
                 return;
             }
             const mCanvas = document.getElementById('minimapCanvas');
             const rect = mCanvas.getBoundingClientRect();
-            const scaleX = mCanvas.width / rect.width;   // 200 / width
+            const scaleX = mCanvas.width / rect.width;
             const scaleY = mCanvas.height / rect.height;
             const mx = (e.clientX - rect.left) * scaleX;
             const my = (e.clientY - rect.top) * scaleY;
-            // Проверим, что клик внутри canvas
             if (mx < 0 || mx > mCanvas.width || my < 0 || my > mCanvas.height) return;
-            // Преобразуем в мировые координаты
-            const gx = (mx / mCanvas.width) * 8000;
-            const gy = (my / mCanvas.height) * 6000;
-            // Найдём ближайшую союзную башню в радиусе 15 пикселей на миникарте
+
+            const map = this.map;
+            const gx = (mx / mCanvas.width) * map.width;
+            const gy = (my / mCanvas.height) * map.height;
             const clickRadiusPx = 15;
             let closestTower = null;
             let minDist = Infinity;
             for (let t of this.towers) {
                 if (t.team === this.playerHero.team && !t.isDead) {
-                    // Координаты башни на миникарте
-                    const tx = (t.x / 8000) * mCanvas.width;
-                    const ty = (t.y / 6000) * mCanvas.height;
+                    const tx = (t.x / map.width) * mCanvas.width;
+                    const ty = (t.y / map.height) * mCanvas.height;
                     const d = Math.hypot(mx - tx, my - ty);
                     if (d < minDist && d <= clickRadiusPx) {
                         minDist = d;
@@ -4480,7 +4379,7 @@ class Game {
                 ctx.fill();
                 ctx.restore();
             } else if (e.type === 'teleport_arrive') {
-                ctx.save(); 
+                ctx.save();
                 ctx.fillStyle = 'rgba(125, 211, 252, 0.4)';
                 ctx.beginPath();
                 ctx.arc(e.x - this.camera.x, e.y - this.camera.y, e.radius || 40, 0, Math.PI * 2);
