@@ -3960,7 +3960,7 @@ class NeutralCreep extends Entity {
 }
 
 // =========================================================================
-//  НОВЫЙ КЛАСС: ЛАГЕРЬ НЕЙТРАЛОВ
+//  НОВЫЙ КЛАСС: ЛАГЕРЬ НЕЙТРАЛОВ (ИСПРАВЛЕННЫЙ)
 // =========================================================================
 
 class NeutralCamp {
@@ -3970,12 +3970,13 @@ class NeutralCamp {
         this.type = type;
         this.teamSide = teamSide;
         this.radius = 160;
-        this.spawnTimer = 30;
-        this.spawnInterval = 30;
+        this.spawnTimer = 30;          // первый спавн через 30 секунд
+        this.spawnInterval = 30;       // интервал между спавнами, если крипы погибли
         this.creeps = [];
-        this.isBlocked = false;
+        this.campBlocked = false;      // переименовано, чтобы не конфликтовать с методом isBlocked()
         this._lastSpawnTime = 0;
         this._initialSpawnDone = false;
+        this._lastSpawnAttemptTime = -10;
         this.spawnOffsets = [];
         if (type === 'weak') {
             this.spawnOffsets = [
@@ -3993,6 +3994,7 @@ class NeutralCamp {
         }
     }
 
+    // Метод проверки блокировки (не переопределяется переменной)
     isBlocked() {
         const checkRadius = this.radius + 30;
         const allHeroes = game.getAllHeroes();
@@ -4015,8 +4017,9 @@ class NeutralCamp {
                 return true;
             }
         }
+        // Исправленный цикл по ботам — используем spread оператор для объединения массивов
         for (let bot of [...game.alliedBots, ...game.enemyBots]) {
-            if (bot.isDead) continue;
+            if (!bot || bot.isDead) continue;
             if (Math.hypot(bot.x - this.x, bot.y - this.y) < checkRadius) {
                 return true;
             }
@@ -4028,11 +4031,12 @@ class NeutralCamp {
         const alive = this.creeps.filter(c => !c.isDead);
         if (alive.length > 0) return false;
 
+        // Используем метод isBlocked() для проверки
         if (this.isBlocked()) {
-            this.isBlocked = true;
+            this.campBlocked = true;
             return false;
         }
-        this.isBlocked = false;
+        this.campBlocked = false;
 
         for (let offset of this.spawnOffsets) {
             const cx = this.x + offset.x + (Math.random() - 0.5) * 20;
@@ -4056,11 +4060,13 @@ class NeutralCamp {
         this.creeps = this.creeps.filter(c => !c.isDead);
         this.spawnTimer -= dt;
         if (this.spawnTimer <= 0) {
-            this.spawn();
-            if (this.creeps.length === 0) {
-                this.spawnTimer = 0.5;
-            } else {
+            const spawned = this.spawn();
+            if (spawned) {
                 this.spawnTimer = this.spawnInterval;
+            } else {
+                // Если спавн не удался (заблокировано или уже есть крипы),
+                // устанавливаем задержку, чтобы не проверять каждый кадр.
+                this.spawnTimer = 1.5; // проверяем раз в 1.5 секунды
             }
         }
     }
@@ -4080,7 +4086,7 @@ class NeutralCamp {
         ctx.setLineDash([4, 4]);
         ctx.stroke();
         ctx.restore();
-        if (this.isBlocked) {
+        if (this.campBlocked) {
             ctx.save();
             ctx.strokeStyle = '#ff0000';
             ctx.lineWidth = 2;
