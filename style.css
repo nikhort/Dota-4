@@ -128,6 +128,13 @@ body, html {
     background-color: #2d1b1b;
     border-color: #8b0000;
 }
+.hero-avatar.io {
+    background-image: url('images/io_icon.png');
+    background-size: cover;
+    background-position: center;
+    background-color: #1a2a3a;
+    border-color: #00ffff;
+}
 
 .autocast-active {
     border: 2px solid #ffaa00 !important;

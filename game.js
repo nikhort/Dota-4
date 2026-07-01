@@ -924,7 +924,6 @@ class Hero extends Entity {
         this.drawTeleportBar(ctx, camera);
     }
 }
-
 // =========================================================================
 //  ГЕРОИ (наследники) – с обновлёнными границами
 // =========================================================================
@@ -1115,7 +1114,7 @@ class AdaptiveStrikeProjectile {
     }
 }
 
-// ----- Warlock (без изменений, кроме границ) -----
+// ----- Warlock -----
 class Warlock extends Hero {
     constructor(x, y, team) {
         super(x, y, team, 'Warlock'); this.attackRange = 380;
@@ -1951,7 +1950,7 @@ class AntiMage extends Hero {
 }
 
 // =========================================================================
-//  BROODMOTHER (с обновлёнными границами)
+//  BROODMOTHER
 // =========================================================================
 
 class Broodmother extends Hero {
@@ -2427,7 +2426,675 @@ class Spiderling extends Entity {
 }
 
 // =========================================================================
-//  ВСПОМОГАТЕЛЬНЫЕ КЛАССЫ (с обновлёнными границами)
+//  НОВЫЙ ГЕРОЙ: IO (WISP)
+// =========================================================================
+
+class Io extends Hero {
+    constructor(x, y, team) {
+        super(x, y, team, 'Io');
+        // Переопределяем статы
+        this.maxHp = 550;
+        this.hp = 550;
+        this.damage = 48;
+        this.baseSpeed = 320;
+        this.speed = 320;
+        this.attackRange = 500;
+        this.attackSpeed = 1.3;
+        this.maxMp = 300;
+        this.mp = 300;
+        this.hpRegenBase = 2.0;
+        this.mpRegenBase = 1.5;
+
+        // Способности
+        this.abilities.push(new Ability('Tether', 'active', 12, 40, 'Tether to an ally. Share 75% of healing/mana. Both gain +6% speed.'));
+        this.abilities.push(new Ability('Spirits', 'active', 15, 60, 'Summon 5 spirits that orbit around Io. Explode on enemy heroes for 70 damage.'));
+        this.abilities.push(new Ability('Overcharge', 'active', 15, 50, 'Gain +35 attack speed, +8% spell damage, 0.8% HP regen/sec for 8 sec. Also affects tethered ally.'));
+        this.abilities.push(new Ability('Relocate', 'active', 50, 100, 'Channel for 3.5 sec then teleport to target location. Returns after 12 sec. Double-tap R to go to fountain.'));
+
+        // Состояния Tether
+        this.tetherTarget = null;
+        this.tetherDistance = 1000;
+        this.tetherSpeedBonus = 0.06;
+        this.tetherSharePercent = 0.75;
+
+        // Состояния Spirits
+        this.spirits = [];
+        this.spiritsDuration = 15;
+        this.spiritsTimer = 0;
+        this.spiritsOrbitRadius = 200;
+        this.spiritsCount = 5;
+        this.spiritsHeroDamage = 70;
+        this.spiritsCreepDamage = 18;
+        this.spiritsActive = false;
+
+        // Состояния Overcharge
+        this.overchargeActive = false;
+        this.overchargeTimer = 0;
+        this.overchargeDuration = 8;
+        this.overchargeAttackSpeedBonus = 35;
+        this.overchargeSpellDamageBonus = 0.08;
+        this.overchargeHpRegenPercent = 0.008;
+
+        // Состояния Relocate
+        this.relocateSelectMode = false;
+        this.relocateChanneling = false;
+        this.relocateChannelTimer = 0;
+        this.relocateChannelDuration = 3.5;
+        this.relocateReturnDelay = 12;
+        this.relocateReturnTimer = 0;
+        this.relocateTargetX = 0;
+        this.relocateTargetY = 0;
+        this.relocateOldX = 0;
+        this.relocateOldY = 0;
+        this.relocateOldTargetX = 0;
+        this.relocateOldTargetY = 0;
+        this.relocateActive = false;
+        this.relocateFountain = null;
+
+        // Для AI
+        this._aiTetherTarget = null;
+        this._aiTetherTimer = 0;
+        this._aiSpiritTimer = 0;
+        this._aiOverchargeTimer = 0;
+        this._aiRelocateTimer = 0;
+        this._aiLane = null; // top или bottom (не mid)
+    }
+
+    // ---------- Q: Tether ----------
+    useTether(target) {
+        if (this.isDead || this.silenceTimer > 0) return false;
+        if (this.abilities[0].currentCooldown > 0 || this.mp < this.abilities[0].manaCost) return false;
+        if (!target || target.isDead || target.team !== this.team) return false;
+        if (target === this) return false;
+        if (this.tetherTarget === target) {
+            // Отвязываемся
+            this.breakTether();
+            return true;
+        }
+        // Проверка дистанции
+        const dist = Math.hypot(target.x - this.x, target.y - this.y);
+        if (dist > this.tetherDistance) {
+            game.uiManager.addFloatingText(this.x, this.y - 30, 'Target too far', '#ff8888');
+            return false;
+        }
+        this.mp -= this.abilities[0].manaCost;
+        this.abilities[0].currentCooldown = this.abilities[0].maxCooldown;
+        audio.play('ability');
+
+        this.tetherTarget = target;
+        // Бонус скорости
+        this.tetherTarget.speed *= (1 + this.tetherSpeedBonus);
+        this.speed *= (1 + this.tetherSpeedBonus);
+        // Сохраняем оригинальные скорости для восстановления
+        if (!this.tetherTarget._origSpeed) {
+            this.tetherTarget._origSpeed = this.tetherTarget.baseSpeed;
+        }
+        if (!this._origSpeed) {
+            this._origSpeed = this.baseSpeed;
+        }
+        game.uiManager.addFloatingText(this.x, this.y - 30, '⚡ Tether', '#00ffff');
+        return true;
+    }
+
+    breakTether() {
+        if (!this.tetherTarget) return;
+        // Восстанавливаем скорости
+        if (this.tetherTarget._origSpeed) {
+            this.tetherTarget.baseSpeed = this.tetherTarget._origSpeed;
+            this.tetherTarget.speed = this.tetherTarget.baseSpeed;
+            delete this.tetherTarget._origSpeed;
+        }
+        if (this._origSpeed) {
+            this.baseSpeed = this._origSpeed;
+            this.speed = this.baseSpeed;
+            delete this._origSpeed;
+        }
+        this.tetherTarget = null;
+        game.uiManager.addFloatingText(this.x, this.y - 30, 'Tether broken', '#ff6666');
+    }
+
+    updateTether(dt) {
+        if (!this.tetherTarget) return;
+        // Проверка дистанции
+        const dist = Math.hypot(this.tetherTarget.x - this.x, this.tetherTarget.y - this.y);
+        if (dist > this.tetherDistance) {
+            this.breakTether();
+            return;
+        }
+        // Если цель умерла
+        if (this.tetherTarget.isDead) {
+            this.breakTether();
+            return;
+        }
+        // Обновляем скорости (если изменились)
+        if (this.tetherTarget.speed !== this.tetherTarget.baseSpeed * (1 + this.tetherSpeedBonus)) {
+            // Восстанавливаем, если вдруг изменилось
+            if (this.tetherTarget._origSpeed) {
+                this.tetherTarget.baseSpeed = this.tetherTarget._origSpeed;
+                this.tetherTarget.speed = this.tetherTarget.baseSpeed * (1 + this.tetherSpeedBonus);
+            }
+        }
+        if (this.speed !== this.baseSpeed * (1 + this.tetherSpeedBonus)) {
+            if (this._origSpeed) {
+                this.baseSpeed = this._origSpeed;
+                this.speed = this.baseSpeed * (1 + this.tetherSpeedBonus);
+            }
+        }
+        // Проверка на врагов, касающихся линии
+        const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+        for (let e of enemies) {
+            if (e.isDead) continue;
+            // Расстояние до линии (упрощённо: если расстояние до отрезка меньше 40)
+            const d = this.distanceToSegment(this.x, this.y, this.tetherTarget.x, this.tetherTarget.y, e.x, e.y);
+            if (d < 40) {
+                e.slowTimer = Math.max(e.slowTimer || 0, 1.0);
+                // Замедление 15% (уже через slowTimer 0.5)
+                e.slowTimer = Math.max(e.slowTimer, 1.0);
+                // Визуальный эффект
+                if (game) game.effects.push({ type: 'tether_slow', x: e.x, y: e.y, life: 0.2 });
+            }
+        }
+        // Передача лечения и маны
+        // Лечение Io
+        if (this.hp > this._lastHp) {
+            const heal = this.hp - this._lastHp;
+            if (heal > 0) {
+                const share = heal * this.tetherSharePercent;
+                this.tetherTarget.hp = Math.min(this.tetherTarget.maxHp, this.tetherTarget.hp + share);
+                if (this.tetherTarget === game.playerHero || this === game.playerHero) {
+                    game.uiManager.addFloatingText(this.tetherTarget.x, this.tetherTarget.y - 20, '+' + Math.floor(share) + ' HP (Tether)', '#66ff66');
+                }
+            }
+        }
+        // Лечение цели
+        if (this.tetherTarget.hp > this._lastTargetHp) {
+            const heal = this.tetherTarget.hp - this._lastTargetHp;
+            if (heal > 0) {
+                const share = heal * this.tetherSharePercent;
+                this.hp = Math.min(this.maxHp, this.hp + share);
+                if (this === game.playerHero || this.tetherTarget === game.playerHero) {
+                    game.uiManager.addFloatingText(this.x, this.y - 20, '+' + Math.floor(share) + ' HP (Tether)', '#66ff66');
+                }
+            }
+        }
+        // Мана
+        if (this.mp > this._lastMp) {
+            const mana = this.mp - this._lastMp;
+            if (mana > 0) {
+                const share = mana * this.tetherSharePercent;
+                this.tetherTarget.mp = Math.min(this.tetherTarget.maxMp, this.tetherTarget.mp + share);
+            }
+        }
+        if (this.tetherTarget.mp > this._lastTargetMp) {
+            const mana = this.tetherTarget.mp - this._lastTargetMp;
+            if (mana > 0) {
+                const share = mana * this.tetherSharePercent;
+                this.mp = Math.min(this.maxMp, this.mp + share);
+            }
+        }
+        // Сохраняем для сравнения в следующем кадре
+        this._lastHp = this.hp;
+        this._lastTargetHp = this.tetherTarget.hp;
+        this._lastMp = this.mp;
+        this._lastTargetMp = this.tetherTarget.mp;
+    }
+
+    distanceToSegment(x1, y1, x2, y2, px, py) {
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const lenSq = dx*dx + dy*dy;
+        if (lenSq === 0) return Math.hypot(px - x1, py - y1);
+        let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+        t = Math.max(0, Math.min(1, t));
+        const nearX = x1 + t * dx;
+        const nearY = y1 + t * dy;
+        return Math.hypot(px - nearX, py - nearY);
+    }
+
+    // ---------- W: Spirits ----------
+    useSpirits() {
+        if (this.isDead || this.silenceTimer > 0) return false;
+        if (this.abilities[1].currentCooldown > 0 || this.mp < this.abilities[1].manaCost) return false;
+        if (this.spiritsActive) return false; // уже активны
+
+        this.mp -= this.abilities[1].manaCost;
+        this.abilities[1].currentCooldown = this.abilities[1].maxCooldown;
+        audio.play('ability');
+
+        this.spiritsActive = true;
+        this.spiritsTimer = this.spiritsDuration;
+        this.spirits = [];
+        for (let i = 0; i < this.spiritsCount; i++) {
+            const angle = (i / this.spiritsCount) * Math.PI * 2;
+            this.spirits.push({
+                angle: angle,
+                speed: 0.8, // радиан в секунду
+                x: this.x + Math.cos(angle) * this.spiritsOrbitRadius,
+                y: this.y + Math.sin(angle) * this.spiritsOrbitRadius,
+                alive: true
+            });
+        }
+        game.uiManager.addFloatingText(this.x, this.y - 30, '🌀 Spirits', '#00ffff');
+        return true;
+    }
+
+    updateSpirits(dt) {
+        if (!this.spiritsActive) return;
+        this.spiritsTimer -= dt;
+        if (this.spiritsTimer <= 0) {
+            // Взрыв всех оставшихся духов
+            for (let s of this.spirits) {
+                if (s.alive) {
+                    this.explodeSpirit(s.x, s.y);
+                }
+            }
+            this.spiritsActive = false;
+            this.spirits = [];
+            return;
+        }
+        // Обновляем позиции духов
+        for (let s of this.spirits) {
+            if (!s.alive) continue;
+            s.angle += s.speed * dt;
+            s.x = this.x + Math.cos(s.angle) * this.spiritsOrbitRadius;
+            s.y = this.y + Math.sin(s.angle) * this.spiritsOrbitRadius;
+            // Проверка столкновения с врагами
+            const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+            for (let e of enemies) {
+                if (e.isDead) continue;
+                const dist = Math.hypot(e.x - s.x, e.y - s.y);
+                if (dist < 40) {
+                    // Столкновение
+                    const isHero = e instanceof Hero;
+                    const dmg = isHero ? this.spiritsHeroDamage : this.spiritsCreepDamage;
+                    if (isHero) {
+                        e.takeDamage(dmg, this, false, 'magic');
+                        this.explodeSpirit(s.x, s.y);
+                        s.alive = false;
+                        // Визуальный эффект
+                        if (game) game.effects.push({ type: 'spirit_explode', x: s.x, y: s.y, life: 0.3, radius: 60 });
+                    } else {
+                        e.takeDamage(dmg, this, false, 'magic');
+                        // Для крипов не взрываем, но дух продолжает жить
+                    }
+                }
+            }
+        }
+        // Удаляем мёртвых духов
+        this.spirits = this.spirits.filter(s => s.alive);
+        if (this.spirits.length === 0) {
+            this.spiritsActive = false;
+            this.spiritsTimer = 0;
+        }
+    }
+
+    explodeSpirit(x, y) {
+        // Урон по области для взрыва духа (только герои)
+        const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+        for (let e of enemies) {
+            if (e.isDead) continue;
+            const dist = Math.hypot(e.x - x, e.y - y);
+            if (dist < 80) {
+                e.takeDamage(this.spiritsHeroDamage, this, false, 'magic');
+            }
+        }
+        if (game) game.effects.push({ type: 'spirit_explode', x: x, y: y, life: 0.3, radius: 80 });
+    }
+
+    // ---------- E: Overcharge ----------
+    useOvercharge() {
+        if (this.isDead || this.silenceTimer > 0) return false;
+        if (this.abilities[2].currentCooldown > 0 || this.mp < this.abilities[2].manaCost) return false;
+        if (this.overchargeActive) return false;
+
+        this.mp -= this.abilities[2].manaCost;
+        this.abilities[2].currentCooldown = this.abilities[2].maxCooldown;
+        audio.play('ability');
+
+        this.overchargeActive = true;
+        this.overchargeTimer = this.overchargeDuration;
+        // Применяем бонусы к себе
+        this.attackSpeed += this.overchargeAttackSpeedBonus / 100;
+        // Для магического урона используем множитель
+        this._spellDamageMultiplier = (this._spellDamageMultiplier || 1) + this.overchargeSpellDamageBonus;
+        // Применяем к tetherTarget
+        if (this.tetherTarget && !this.tetherTarget.isDead) {
+            this.tetherTarget.attackSpeed += this.overchargeAttackSpeedBonus / 100;
+            this.tetherTarget._spellDamageMultiplier = (this.tetherTarget._spellDamageMultiplier || 1) + this.overchargeSpellDamageBonus;
+        }
+        game.uiManager.addFloatingText(this.x, this.y - 30, '⚡ Overcharge', '#ffaa00');
+        return true;
+    }
+
+    updateOvercharge(dt) {
+        if (!this.overchargeActive) return;
+        this.overchargeTimer -= dt;
+        if (this.overchargeTimer <= 0) {
+            this.overchargeActive = false;
+            // Восстанавливаем бонусы
+            this.attackSpeed -= this.overchargeAttackSpeedBonus / 100;
+            if (this._spellDamageMultiplier) {
+                this._spellDamageMultiplier -= this.overchargeSpellDamageBonus;
+                if (this._spellDamageMultiplier < 1) this._spellDamageMultiplier = 1;
+            }
+            if (this.tetherTarget && !this.tetherTarget.isDead) {
+                this.tetherTarget.attackSpeed -= this.overchargeAttackSpeedBonus / 100;
+                if (this.tetherTarget._spellDamageMultiplier) {
+                    this.tetherTarget._spellDamageMultiplier -= this.overchargeSpellDamageBonus;
+                    if (this.tetherTarget._spellDamageMultiplier < 1) this.tetherTarget._spellDamageMultiplier = 1;
+                }
+            }
+            game.uiManager.addFloatingText(this.x, this.y - 30, 'Overcharge fades', '#aaaaaa');
+            return;
+        }
+        // Регенерация HP
+        const heal = this.maxHp * this.overchargeHpRegenPercent * dt;
+        this.hp = Math.min(this.maxHp, this.hp + heal);
+        if (this.tetherTarget && !this.tetherTarget.isDead) {
+            this.tetherTarget.hp = Math.min(this.tetherTarget.maxHp, this.tetherTarget.hp + heal);
+        }
+    }
+
+    // ---------- R: Relocate ----------
+    startRelocate(x, y) {
+        if (this.isDead || this.silenceTimer > 0) return false;
+        if (this.abilities[3].currentCooldown > 0 || this.mp < this.abilities[3].manaCost) return false;
+        if (this.relocateChanneling || this.relocateActive) return false;
+
+        this.mp -= this.abilities[3].manaCost;
+        this.abilities[3].currentCooldown = this.abilities[3].maxCooldown;
+        audio.play('ability');
+
+        this.relocateChanneling = true;
+        this.relocateChannelTimer = this.relocateChannelDuration;
+        this.relocateTargetX = x;
+        this.relocateTargetY = y;
+        this.relocateOldX = this.x;
+        this.relocateOldY = this.y;
+        this.relocateOldTargetX = this.tetherTarget ? this.tetherTarget.x : this.x;
+        this.relocateOldTargetY = this.tetherTarget ? this.tetherTarget.y : this.y;
+        // Останавливаем движение
+        this.attackTarget = null;
+        this.targetX = this.x;
+        this.targetY = this.y;
+        this.isMovingToWaypoint = false;
+        if (game) game.effects.push({ type: 'relocate_channel', x: this.x, y: this.y, life: this.relocateChannelDuration });
+        return true;
+    }
+
+    updateRelocate(dt) {
+        if (this.relocateChanneling) {
+            this.relocateChannelTimer -= dt;
+            if (this.relocateChannelTimer <= 0) {
+                this.finishRelocate();
+            }
+            // Проверка прерывания (движение или смерть)
+            const distMoved = Math.hypot(this.x - this.relocateOldX, this.y - this.relocateOldY);
+            if (distMoved > 10 || this.isDead) {
+                this.cancelRelocate();
+            }
+        }
+        if (this.relocateActive) {
+            this.relocateReturnTimer -= dt;
+            if (this.relocateReturnTimer <= 0) {
+                this.returnRelocate();
+            }
+        }
+    }
+
+    finishRelocate() {
+        if (!this.relocateChanneling) return;
+        this.relocateChanneling = false;
+        // Телепортируем Io
+        this.x = this.relocateTargetX;
+        this.y = this.relocateTargetY;
+        this.targetX = this.x;
+        this.targetY = this.y;
+        // Телепортируем связанного союзника
+        if (this.tetherTarget && !this.tetherTarget.isDead) {
+            this.tetherTarget.x = this.relocateTargetX + (Math.random() - 0.5) * 80;
+            this.tetherTarget.y = this.relocateTargetY + (Math.random() - 0.5) * 80;
+            this.tetherTarget.targetX = this.tetherTarget.x;
+            this.tetherTarget.targetY = this.tetherTarget.y;
+        }
+        // Устанавливаем возврат
+        this.relocateActive = true;
+        this.relocateReturnTimer = this.relocateReturnDelay;
+        game.uiManager.addFloatingText(this.x, this.y - 30, '🚀 Relocated!', '#00ff00');
+        if (game) game.effects.push({ type: 'relocate_arrive', x: this.x, y: this.y, life: 0.5, radius: 80 });
+    }
+
+    cancelRelocate() {
+        if (!this.relocateChanneling) return;
+        this.relocateChanneling = false;
+        this.relocateChannelTimer = 0;
+        game.uiManager.addFloatingText(this.x, this.y - 30, 'Relocate cancelled', '#ff6666');
+    }
+
+    returnRelocate() {
+        if (!this.relocateActive) return;
+        this.relocateActive = false;
+        // Возвращаем Io
+        this.x = this.relocateOldX;
+        this.y = this.relocateOldY;
+        this.targetX = this.x;
+        this.targetY = this.y;
+        // Возвращаем связанного союзника
+        if (this.tetherTarget && !this.tetherTarget.isDead) {
+            this.tetherTarget.x = this.relocateOldTargetX;
+            this.tetherTarget.y = this.relocateOldTargetY;
+            this.tetherTarget.targetX = this.tetherTarget.x;
+            this.tetherTarget.targetY = this.tetherTarget.y;
+        }
+        game.uiManager.addFloatingText(this.x, this.y - 30, '🔙 Returned!', '#ffff00');
+        if (game) game.effects.push({ type: 'relocate_return', x: this.x, y: this.y, life: 0.5, radius: 80 });
+    }
+
+    // ---------- Переопределение useAbility ----------
+    useAbility(idx) {
+        if (this.isDead || this.silenceTimer > 0) return;
+        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); }
+
+        if (idx === 0) { // Tether
+            // Выбираем союзника
+            let target = this.attackTarget;
+            if (!target || target.team !== this.team || target.isDead) {
+                const allies = this.team === 'radiant' ? game.radiantEntities() : game.direEntities();
+                // Ищем ближайшего союзника
+                let closest = null;
+                let minDist = Infinity;
+                for (let a of allies) {
+                    if (a === this || a.isDead) continue;
+                    const d = Math.hypot(a.x - this.x, a.y - this.y);
+                    if (d < minDist) {
+                        minDist = d;
+                        closest = a;
+                    }
+                }
+                target = closest;
+            }
+            if (target) {
+                this.useTether(target);
+            } else {
+                game.uiManager.addFloatingText(this.x, this.y - 30, 'No ally nearby', '#ff8888');
+            }
+        } else if (idx === 1) { // Spirits
+            this.useSpirits();
+        } else if (idx === 2) { // Overcharge
+            this.useOvercharge();
+        } else if (idx === 3) { // Relocate
+            // Если уже активен режим выбора - отключаем
+            if (this.relocateSelectMode) {
+                this.relocateSelectMode = false;
+                game._teleportSelectionMode = false;
+                game.uiManager.addFloatingText(this.x, this.y - 30, 'Relocate cancelled', '#ff6666');
+                return;
+            }
+            // Если есть релоут активен, отменяем
+            if (this.relocateActive) {
+                this.returnRelocate();
+                return;
+            }
+            // Если каналим - отменяем
+            if (this.relocateChanneling) {
+                this.cancelRelocate();
+                return;
+            }
+            // Включаем режим выбора точки
+            this.relocateSelectMode = true;
+            game._teleportSelectionMode = true;
+            game.uiManager.addFloatingText(this.x, this.y - 50, '📍 Select relocate point on minimap', '#00ffff');
+        }
+    }
+
+    // ---------- Переопределение update ----------
+    update(dt) {
+        if (this.isDead) return;
+        this.updateTeleport(dt);
+        this.updateBuffs(dt);
+        if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.getHpRegen() * dt);
+        if (this.maxMp > 0 && this.mp < this.maxMp) this.mp = Math.min(this.maxMp, this.mp + this.getMpRegen() * dt);
+
+        // Обновляем Tether
+        this.updateTether(dt);
+        // Обновляем Spirits
+        this.updateSpirits(dt);
+        // Обновляем Overcharge
+        this.updateOvercharge(dt);
+        // Обновляем Relocate
+        this.updateRelocate(dt);
+
+        // Движение и атака
+        this.updateMovement(dt);
+        let rate = 1.0;
+        if (this.headshotSlowTimer > 0) rate *= 0.5;
+        if (this.lifeBreakSlowTimer > 0) rate *= 0.4;
+        if (this.attackCooldown > 0) this.attackCooldown -= dt * rate;
+
+        if (this.attackTarget && this.attackTarget.isAttackable()) {
+            if (this.attackTarget.isDead) { this.attackTarget = null; return; }
+            let d = Math.hypot(this.attackTarget.x - this.x, this.attackTarget.y - this.y);
+            if (d <= this.attackRange && this.attackCooldown <= 0) { this.performAttack(); }
+        } else {
+            this.attackTarget = null;
+        }
+
+        for (let ab of this.abilities) ab.update(dt);
+    }
+
+    // Переопределяем performAttack для учёта Overcharge
+    performAttack() {
+        if (this.isChannelingTeleport) {
+            this.cancelTeleport('ability');
+            return;
+        }
+        if (this.attackTarget && this.attackTarget.inventory) {
+            const radianceItem = this.attackTarget.inventory.items.find(item => item.id === 'radiance');
+            if (radianceItem) {
+                const d = Math.hypot(this.x - this.attackTarget.x, this.y - this.attackTarget.y);
+                if (d <= 500) {
+                    if (Math.random() < 0.05) {
+                        game.uiManager.addFloatingText(this.x, this.y - 20, "MISS", '#ff6666');
+                        return;
+                    }
+                }
+            }
+        }
+
+        this.attackCooldown = this.attackSpeed;
+        audio.play('attack');
+        let finalDamage = this.damage;
+        if (this.vladmirAura) finalDamage *= 1.18;
+        // Бонус от Overcharge на магический урон (не применяется к атакам, только к способностям)
+        // Но в атаках мы не используем spellDamageMultiplier
+        let critChance = 0;
+        let critMultiplier = 1;
+        for (let item of this.inventory.items) {
+            if (item.stats?.critChance) critChance = Math.max(critChance, item.stats.critChance);
+            if (item.stats?.critMultiplier) critMultiplier = Math.max(critMultiplier, item.stats.critMultiplier);
+        }
+
+        let proj = new Projectile(this.x, this.y, this.attackTarget, finalDamage, this.team, this);
+        if (Math.random() < critChance) {
+            proj.isCrit = true;
+            proj.damage = Math.max(1, proj.damage * critMultiplier);
+        }
+        game.projectiles.push(proj);
+    }
+
+    // ---------- Отрисовка ----------
+    drawTether(ctx, camera) {
+        if (!this.tetherTarget) return;
+        const sx = this.x - camera.x;
+        const sy = this.y - camera.y;
+        const ex = this.tetherTarget.x - camera.x;
+        const ey = this.tetherTarget.y - camera.y;
+        ctx.save();
+        ctx.strokeStyle = '#00ffff';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.moveTo(sx, sy);
+        ctx.lineTo(ex, ey);
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    drawSpirits(ctx, camera) {
+        if (!this.spiritsActive) return;
+        for (let s of this.spirits) {
+            if (!s.alive) continue;
+            const sx = s.x - camera.x;
+            const sy = s.y - camera.y;
+            ctx.save();
+            ctx.fillStyle = '#00ffff';
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = '#00ffff';
+            ctx.beginPath();
+            ctx.arc(sx, sy, 8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+    }
+
+    draw(ctx, camera) {
+        if (this.isDead) return;
+        // Рисуем Tether
+        this.drawTether(ctx, camera);
+        // Рисуем Spirits
+        this.drawSpirits(ctx, camera);
+        // Рисуем Relocate канал
+        if (this.relocateChanneling) {
+            const sx = this.x - camera.x;
+            const sy = this.y - camera.y;
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255, 255, 0, 0.6)';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(sx, sy, 50 + (1 - this.relocateChannelTimer / this.relocateChannelDuration) * 30, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(255, 255, 0, 0.1)';
+            ctx.fill();
+            ctx.restore();
+        }
+        // Рисуем Overcharge индикатор
+        if (this.overchargeActive) {
+            const sx = this.x - camera.x;
+            const sy = this.y - camera.y;
+            ctx.save();
+            ctx.strokeStyle = '#ffaa00';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(sx, sy, this.radius + 8, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        }
+        super.draw(ctx, camera);
+    }
+}
+
+// =========================================================================
+//  ВСПОМОГАТЕЛЬНЫЕ КЛАССЫ
 // =========================================================================
 
 class ShrapnelZone {
@@ -3182,7 +3849,7 @@ class Barracks {
 }
 
 // =========================================================================
-//  ИИ БОТОВ
+//  ИИ БОТОВ (с Io)
 // =========================================================================
 
 class BotAI {
@@ -3219,6 +3886,9 @@ class BotAI {
         } else if (name === 'Broodmother') {
             this.build = ['ringhealth', 'vitality', 'ringtarrasque', 'reaver'];
             this.finalItems = ['vanguard', 'heart'];
+        } else if (name === 'Io') {
+            this.build = ['ringhealth', 'vitality', 'ringtarrasque', 'reaver'];
+            this.finalItems = ['vanguard', 'heart'];
         } else {
             this.build = [];
             this.finalItems = [];
@@ -3226,6 +3896,15 @@ class BotAI {
         this.currentFinalItemIndex = 0;
         this.hero.gold = 100;
         this._lastTeleportTime = 0;
+
+        // Специфичные для Io
+        if (hero instanceof Io) {
+            this._ioTetherTarget = null;
+            this._ioTetherCooldown = 0;
+            this._ioLane = lane; // top или bottom (mid исключён)
+            this._ioHasTethered = false;
+            this._ioTetherCheckTimer = 0;
+        }
     }
 
     update(dt) {
@@ -3252,29 +3931,91 @@ class BotAI {
             this.useTeleport();
         }
 
-        if (hero instanceof Broodmother) {
-            if (hero.abilities[1].currentCooldown <= 0 && hero.mp >= 35) {
-                this._aiWebTimer += dt;
-                if (this._aiWebTimer > 3.0) {
-                    this._aiWebTimer = 0;
-                    let tx = hero.x + (Math.random() - 0.5) * 300;
-                    let ty = hero.y + (Math.random() - 0.5) * 300;
-                    hero.useSpinWeb(tx, ty);
+        // ----- Специфическая логика для Io -----
+        if (hero instanceof Io) {
+            // 1. Выбор цели для Tether (приоритет: игрок -> ближайший союзный герой -> случайный союзник)
+            if (!hero.tetherTarget && !hero._origSpeed) {
+                let target = null;
+                // Игрок
+                if (game.playerHero && game.playerHero.team === hero.team && !game.playerHero.isDead) {
+                    target = game.playerHero;
+                }
+                // Если нет игрока или он мёртв, ближайший герой
+                if (!target) {
+                    const allies = hero.team === 'radiant' ? game.radiantEntities() : game.direEntities();
+                    let closest = null;
+                    let minDist = Infinity;
+                    for (let a of allies) {
+                        if (a === hero || a.isDead) continue;
+                        if (!(a instanceof Hero)) continue;
+                        const d = Math.hypot(a.x - hero.x, a.y - hero.y);
+                        if (d < minDist) {
+                            minDist = d;
+                            closest = a;
+                        }
+                    }
+                    target = closest;
+                }
+                if (target) {
+                    hero.useTether(target);
+                    this._ioHasTethered = true;
                 }
             }
-            if (hero.attackTarget && !hero.attackTarget.isDead && hero.attackTarget.team !== hero.team) {
-                if (hero.abilities[0].currentCooldown <= 0 && hero.mp >= 30 && !hero.hungerActive) {
-                    hero.useInsatiableHunger();
+
+            // 2. Контроль дистанции до связанного союзника
+            if (hero.tetherTarget) {
+                const dist = Math.hypot(hero.tetherTarget.x - hero.x, hero.tetherTarget.y - hero.y);
+                if (dist > 850) {
+                    // Догоняем союзника
+                    hero.targetX = hero.tetherTarget.x;
+                    hero.targetY = hero.tetherTarget.y;
                 }
-                if (hero.abilities[3].currentCooldown <= 0 && hero.mp >= 60) {
-                    const target = hero.attackTarget;
-                    if (target && target.hp < target.maxHp * 0.5) {
-                        hero.useSpawnSpiderlings(target);
+                if (dist > 950) {
+                    // Срочно приближаемся
+                    hero.targetX = hero.tetherTarget.x;
+                    hero.targetY = hero.tetherTarget.y;
+                    hero.speed = hero.baseSpeed * 1.5;
+                }
+                if (dist > 1000) {
+                    // Разрыв, пытаемся восстановить
+                    hero.breakTether();
+                    // Повторно привязываемся
+                    hero.useTether(hero.tetherTarget);
+                }
+            }
+
+            // 3. Использование способностей
+            if (hero.attackTarget && hero.attackTarget.team !== hero.team && !hero.attackTarget.isDead) {
+                // В бою
+                if (hero.abilities[2].currentCooldown <= 0 && hero.mp >= 50 && !hero.overchargeActive) {
+                    hero.useOvercharge();
+                }
+                // Spirits, если есть враги рядом
+                const enemiesNear = hero.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+                let count = 0;
+                for (let e of enemiesNear) {
+                    if (e.isDead) continue;
+                    if (Math.hypot(e.x - hero.x, e.y - hero.y) < 400) count++;
+                }
+                if (count >= 2 && hero.abilities[1].currentCooldown <= 0 && hero.mp >= 60 && !hero.spiritsActive) {
+                    hero.useSpirits();
+                }
+            }
+
+            // 4. Relocate (используем редко)
+            if (hero.abilities[3].currentCooldown <= 0 && hero.mp >= 100 && !hero.relocateActive && !hero.relocateChanneling) {
+                // Если есть возможность телепортироваться к союзнику в опасности
+                if (hero.tetherTarget && hero.tetherTarget.hp < hero.tetherTarget.maxHp * 0.3) {
+                    // Телепорт к фонтану
+                    const fountain = hero.team === 'radiant' ? game.fountains[0] : game.fountains[1];
+                    if (fountain) {
+                        hero.startRelocate(fountain.x, fountain.y);
                     }
                 }
             }
         }
 
+        // ----- Общая логика -----
         const hpPercent = hero.hp / hero.maxHp;
         if (hpPercent <= this.retreatThreshold && this.state !== 'heal') {
             this.state = 'retreat';
@@ -3552,6 +4293,7 @@ class BotAI {
                 }
             }
         } else {
+            // Для остальных героев (включая Io) — стандартная логика
             for (let i = 0; i < hero.abilities.length; i++) {
                 const ab = hero.abilities[i];
                 if (ab.type === 'passive') continue;
@@ -3622,6 +4364,9 @@ class UIManager {
                 } else if (heroKey === 'Broodmother') {
                     profileIcon.src = 'images/broodmother_profile.png';
                     profileIcon.alt = 'Broodmother profile';
+                } else if (heroKey === 'Io') {
+                    profileIcon.src = 'images/io_profile.png';
+                    profileIcon.alt = 'Io profile';
                 } else {
                     profileIcon.src = '';
                     profileIcon.alt = '';
@@ -3995,14 +4740,20 @@ class Game {
     start(selectedHeroName) {
         audio.init();
         this.playerHero = this.createHero(selectedHeroName, this.map.radiantBase.x, this.map.radiantBase.y, 'radiant');
-        const pool = ['Morphling', 'Warlock', 'Sniper', 'Bristleback', 'Huskar', 'Anti-Mage', 'Broodmother'];
+        const pool = ['Morphling', 'Warlock', 'Sniper', 'Bristleback', 'Huskar', 'Anti-Mage', 'Broodmother', 'Io'];
+        // Io не ходит на мид
+        let enemyLane = 'mid';
+        // Если игрок выбрал Io, то enemyLane может быть top или bottom
+        // Но проще: enemyHero всегда mid, Io может быть только у игрока или на боковых линиях
         this.enemyHero = this.createHero(pool[Math.floor(Math.random() * pool.length)], this.map.direBase.x, this.map.direBase.y, 'dire');
         this.enemyHero.ai = new BotAI(this.enemyHero, 'mid', this);
 
         const alliedLanes = ['top', 'bottom'];
+        // Для Io исключаем mid, поэтому назначаем его на случайную боковую линию
         for (let lane of alliedLanes) {
             for (let i = 0; i < 2; i++) {
-                const name = pool[Math.floor(Math.random() * pool.length)];
+                let name = pool[Math.floor(Math.random() * pool.length)];
+                // Если это Io, убедимся, что он не на mid (уже гарантировано)
                 const x = this.map.radiantBase.x + 100 + i * 80;
                 const y = this.map.radiantBase.y - 100 + i * 80;
                 const hero = this.createHero(name, x, y, 'radiant');
@@ -4013,7 +4764,7 @@ class Game {
 
         for (let lane of alliedLanes) {
             for (let i = 0; i < 2; i++) {
-                const name = pool[Math.floor(Math.random() * pool.length)];
+                let name = pool[Math.floor(Math.random() * pool.length)];
                 const x = this.map.direBase.x - 100 - i * 80;
                 const y = this.map.direBase.y + 100 + i * 80;
                 const hero = this.createHero(name, x, y, 'dire');
@@ -4035,6 +4786,7 @@ class Game {
         if (name === 'Huskar') return new Huskar(x, y, team);
         if (name === 'Anti-Mage') return new AntiMage(x, y, team);
         if (name === 'Broodmother') return new Broodmother(x, y, team);
+        if (name === 'Io') return new Io(x, y, team);
         return new Sniper(x, y, team);
     }
 
@@ -4134,7 +4886,31 @@ class Game {
             }
         });
 
+        // Обработчик для миникарты (телепорт и Relocate)
         document.getElementById('minimapCanvas').addEventListener('click', (e) => {
+            // Сначала проверяем Relocate у Io
+            const player = this.playerHero;
+            if (player instanceof Io && player.relocateSelectMode) {
+                const mCanvas = document.getElementById('minimapCanvas');
+                const rect = mCanvas.getBoundingClientRect();
+                const scaleX = mCanvas.width / rect.width;
+                const scaleY = mCanvas.height / rect.height;
+                const mx = (e.clientX - rect.left) * scaleX;
+                const my = (e.clientY - rect.top) * scaleY;
+                if (mx < 0 || mx > mCanvas.width || my < 0 || my > mCanvas.height) return;
+
+                const map = this.map;
+                const gx = (mx / mCanvas.width) * map.width;
+                const gy = (my / mCanvas.height) * map.height;
+                player.startRelocate(gx, gy);
+                player.relocateSelectMode = false;
+                this._teleportSelectionMode = false;
+                e.stopPropagation();
+                e.preventDefault();
+                return;
+            }
+
+            // Обычный телепорт
             if (!this._teleportSelectionMode || !this.playerHero || this.playerHero.isDead || this.playerHero.teleportCharges <= 0 || this.playerHero.isChannelingTeleport) {
                 return;
             }
@@ -4192,6 +4968,8 @@ class Game {
                     this._teleportSelectionMode = false;
                 }
             }
+            // Для Io: двойное нажатие R (проверяем, если уже нажата R, то отправить к фонтану)
+            // Но у нас useAbility обрабатывает R, а здесь мы можем перехватить двойное нажатие, но для простоты сделаем через useAbility
         });
 
         document.getElementById('open-shop-btn').addEventListener('click', () => this.toggleShop());
@@ -4387,6 +5165,42 @@ class Game {
                 ctx.strokeStyle = '#7dd3fc';
                 ctx.lineWidth = 2;
                 ctx.stroke();
+                ctx.restore();
+            } else if (e.type === 'spirit_explode') {
+                ctx.save();
+                ctx.fillStyle = 'rgba(0, 255, 255, 0.3)';
+                ctx.beginPath();
+                ctx.arc(e.x - this.camera.x, e.y - this.camera.y, e.radius || 60, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            } else if (e.type === 'relocate_channel') {
+                ctx.save();
+                ctx.strokeStyle = 'rgba(255, 255, 0, 0.3)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(e.x - this.camera.x, e.y - this.camera.y, 40, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.restore();
+            } else if (e.type === 'relocate_arrive') {
+                ctx.save();
+                ctx.fillStyle = 'rgba(0, 255, 0, 0.3)';
+                ctx.beginPath();
+                ctx.arc(e.x - this.camera.x, e.y - this.camera.y, e.radius || 80, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            } else if (e.type === 'relocate_return') {
+                ctx.save();
+                ctx.fillStyle = 'rgba(255, 255, 0, 0.3)';
+                ctx.beginPath();
+                ctx.arc(e.x - this.camera.x, e.y - this.camera.y, e.radius || 80, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            } else if (e.type === 'tether_slow') {
+                ctx.save();
+                ctx.fillStyle = 'rgba(0, 255, 255, 0.2)';
+                ctx.beginPath();
+                ctx.arc(e.x - this.camera.x, e.y - this.camera.y, 20, 0, Math.PI * 2);
+                ctx.fill();
                 ctx.restore();
             }
         }
