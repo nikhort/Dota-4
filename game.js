@@ -599,7 +599,6 @@ class Hero extends Entity {
         this.radianceTimer = 0;
         this.passiveGoldTimer = 0;
 
-        // --- Телепорт (обычный) ---
         this.teleportCharges = 0;
         this.isChannelingTeleport = false;
         this.teleportTarget = null;
@@ -919,11 +918,11 @@ class Hero extends Entity {
         this.drawTeleportBar(ctx, camera);
     }
 }
-
 // =========================================================================
-//  ГЕРОИ (наследники)
+//  ГЕРОИ (наследники) – полные определения
 // =========================================================================
 
+// ----- Morphling -----
 class Morphling extends Hero {
     constructor(x, y, team) {
         super(x, y, team, 'Morphling');
@@ -1110,6 +1109,7 @@ class AdaptiveStrikeProjectile {
     }
 }
 
+// ----- Warlock -----
 class Warlock extends Hero {
     constructor(x, y, team) {
         super(x, y, team, 'Warlock'); this.attackRange = 380;
@@ -1378,6 +1378,7 @@ class Warlock extends Hero {
     }
 }
 
+// ----- Bristleback -----
 class Bristleback extends Hero {
     constructor(x, y, team) {
         super(x, y, team, 'Bristleback');
@@ -1558,6 +1559,7 @@ class Bristleback extends Hero {
     }
 }
 
+// ----- Sniper -----
 class Sniper extends Hero {
     constructor(x, y, team) {
         super(x, y, team, 'Sniper'); 
@@ -1672,6 +1674,7 @@ class Sniper extends Hero {
     }
 }
 
+// ----- Huskar -----
 class Huskar extends Hero {
     constructor(x, y, team) {
         super(x, y, team, 'Huskar');
@@ -1790,6 +1793,7 @@ class Huskar extends Hero {
     }
 }
 
+// ----- Anti-Mage -----
 class AntiMage extends Hero {
     constructor(x, y, team) {
         super(x, y, team, 'Anti-Mage');
@@ -1939,6 +1943,7 @@ class AntiMage extends Hero {
         }
     }
 }
+
 // =========================================================================
 //  BROODMOTHER
 // =========================================================================
@@ -2294,7 +2299,7 @@ class Broodmother extends Hero {
 }
 
 // =========================================================================
-//  ПРИЗЫВАЕМЫЕ ПАУЧКИ
+//  ПРИЗЫВАЕМЫЕ ПАУЧКИ (Spiderling)
 // =========================================================================
 
 class Spiderling extends Entity {
@@ -2416,7 +2421,7 @@ class Spiderling extends Entity {
 }
 
 // =========================================================================
-//  НОВЫЙ ГЕРОЙ: IO (WISP) — ИСПРАВЛЕННЫЙ
+//  IO (WISP) — ИСПРАВЛЕННЫЙ (Tether только Io→союзник)
 // =========================================================================
 
 class Io extends Hero {
@@ -2439,7 +2444,6 @@ class Io extends Hero {
         this.abilities.push(new Ability('Overcharge', 'active', 15, 50, 'Gain +35 attack speed, +8% spell damage, 0.8% HP regen/sec for 8 sec. Also affects tethered ally.'));
         this.abilities.push(new Ability('Relocate', 'active', 50, 100, 'Channel for 3.5 sec then teleport to target location. Returns after 12 sec. Double-tap R to go to fountain.'));
 
-        // Состояния Tether (исправленные)
         this.tetherTarget = null;
         this.tetherDistance = 1000;
         this.tetherSpeedBonus = 0.06;
@@ -2455,7 +2459,6 @@ class Io extends Hero {
         this._tetherLastMp = 0;
         this._tetherActive = false;
 
-        // Состояния Spirits
         this.spirits = [];
         this.spiritsDuration = 15;
         this.spiritsTimer = 0;
@@ -2465,7 +2468,6 @@ class Io extends Hero {
         this.spiritsCreepDamage = 18;
         this.spiritsActive = false;
 
-        // Состояния Overcharge
         this.overchargeActive = false;
         this.overchargeTimer = 0;
         this.overchargeDuration = 8;
@@ -2473,7 +2475,6 @@ class Io extends Hero {
         this.overchargeSpellDamageBonus = 0.08;
         this.overchargeHpRegenPercent = 0.008;
 
-        // Состояния Relocate (отдельная система)
         this.isRelocateSelectMode = false;
         this.isRelocateChanneling = false;
         this.isRelocateActive = false;
@@ -2487,9 +2488,7 @@ class Io extends Hero {
         this.relocateOldY = 0;
         this.relocateOldTargetX = 0;
         this.relocateOldTargetY = 0;
-        this.relocateFountain = null;
 
-        // Для AI
         this._aiTetherTarget = null;
         this._aiTetherTimer = 0;
         this._aiSpiritTimer = 0;
@@ -2498,7 +2497,6 @@ class Io extends Hero {
         this._aiLane = null;
     }
 
-    // ---------- Q: Tether (исправленный) ----------
     useTether(target) {
         if (this.isDead || this.silenceTimer > 0) return false;
         if (this.abilities[0].currentCooldown > 0 || this.mp < this.abilities[0].manaCost) return false;
@@ -2527,7 +2525,6 @@ class Io extends Hero {
             this._origSpeed = this.baseSpeed;
         }
 
-        // Сброс таймеров и буферов (только для Io → союзник)
         this.tetherHealTimer = this.tetherTransferDelay;
         this.tetherManaTimer = this.tetherTransferDelay;
         this._tetherHealBuffer = 0;
@@ -2571,7 +2568,6 @@ class Io extends Hero {
             return;
         }
 
-        // Проверка дистанции и смерти
         const dist = Math.hypot(this.tetherTarget.x - this.x, this.tetherTarget.y - this.y);
         if (dist > this.tetherDistance) {
             this.breakTether();
@@ -2582,7 +2578,6 @@ class Io extends Hero {
             return;
         }
 
-        // Обновление скоростей
         if (this.tetherTarget.speed !== this.tetherTarget.baseSpeed * (1 + this.tetherSpeedBonus)) {
             if (this.tetherTarget._origSpeed) {
                 this.tetherTarget.baseSpeed = this.tetherTarget._origSpeed;
@@ -2596,7 +2591,6 @@ class Io extends Hero {
             }
         }
 
-        // Враги, касающиеся линии (замедление)
         const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
         for (let e of enemies) {
             if (e.isDead) continue;
@@ -2607,8 +2601,7 @@ class Io extends Hero {
             }
         }
 
-        // ---- Передача лечения и маны ТОЛЬКО от Io к союзнику ----
-        // Буферизация изменений HP/MP у Io
+        // Только Io → союзник
         const hpDelta = this.hp - this._tetherLastHp;
         const mpDelta = this.mp - this._tetherLastMp;
 
@@ -2619,11 +2612,9 @@ class Io extends Hero {
             this._tetherManaBuffer += mpDelta * this.tetherSharePercent;
         }
 
-        // Обновление таймеров
         this.tetherHealTimer -= dt;
         this.tetherManaTimer -= dt;
 
-        // Передача лечения (если таймер истёк и есть буфер)
         if (this.tetherHealTimer <= 0 && this._tetherHealBuffer > 0) {
             const healAmount = Math.floor(this._tetherHealBuffer);
             if (healAmount > 0) {
@@ -2634,7 +2625,6 @@ class Io extends Hero {
             this.tetherHealTimer = this.tetherHealTransferInterval;
         }
 
-        // Передача маны
         if (this.tetherManaTimer <= 0 && this._tetherManaBuffer > 0) {
             const manaAmount = Math.floor(this._tetherManaBuffer);
             if (manaAmount > 0) {
@@ -2645,7 +2635,6 @@ class Io extends Hero {
             this.tetherManaTimer = this.tetherManaTransferInterval;
         }
 
-        // Обновляем сохранённые значения только для Io (союзник не отслеживается)
         this._tetherLastHp = this.hp;
         this._tetherLastMp = this.mp;
     }
@@ -2662,7 +2651,6 @@ class Io extends Hero {
         return Math.hypot(px - nearX, py - nearY);
     }
 
-    // ---------- W: Spirits ----------
     useSpirits() {
         if (this.isDead || this.silenceTimer > 0) return false;
         if (this.abilities[1].currentCooldown > 0 || this.mp < this.abilities[1].manaCost) return false;
@@ -2744,7 +2732,6 @@ class Io extends Hero {
         if (game) game.effects.push({ type: 'spirit_explode', x: x, y: y, life: 0.3, radius: 80 });
     }
 
-    // ---------- E: Overcharge ----------
     useOvercharge() {
         if (this.isDead || this.silenceTimer > 0) return false;
         if (this.abilities[2].currentCooldown > 0 || this.mp < this.abilities[2].manaCost) return false;
@@ -2793,12 +2780,11 @@ class Io extends Hero {
         }
     }
 
-    // ---------- R: Relocate (отдельная система) ----------
     startRelocate(x, y) {
         if (this.isDead || this.silenceTimer > 0) return false;
         if (this.abilities[3].currentCooldown > 0 || this.mp < this.abilities[3].manaCost) return false;
         if (this.isRelocateChanneling || this.isRelocateActive) return false;
-        if (this.isChannelingTeleport) return false; // нельзя одновременно с телепортом
+        if (this.isChannelingTeleport) return false;
 
         this.mp -= this.abilities[3].manaCost;
         this.abilities[3].currentCooldown = this.abilities[3].maxCooldown;
@@ -2882,7 +2868,6 @@ class Io extends Hero {
         if (game) game.effects.push({ type: 'relocate_return', x: this.x, y: this.y, life: 0.5, radius: 80 });
     }
 
-    // ---------- Переопределение useAbility ----------
     useAbility(idx) {
         if (this.isDead || this.silenceTimer > 0) return;
         if (this.isChannelingTeleport) { this.cancelTeleport('ability'); }
@@ -2913,7 +2898,6 @@ class Io extends Hero {
         } else if (idx === 2) {
             this.useOvercharge();
         } else if (idx === 3) {
-            // Relocate
             if (this.isRelocateActive) {
                 this.returnRelocate();
                 return;
@@ -2922,14 +2906,12 @@ class Io extends Hero {
                 this.cancelRelocate();
                 return;
             }
-            // Включаем режим выбора точки
             this.isRelocateSelectMode = true;
             game._relocateSelectionMode = true;
             game.uiManager.addFloatingText(this.x, this.y - 50, '📍 Select relocate point on minimap', '#00ffff');
         }
     }
 
-    // ---------- Переопределение update ----------
     update(dt) {
         if (this.isDead) return;
         this.updateTeleport(dt);
@@ -3817,7 +3799,314 @@ class Barracks {
 }
 
 // =========================================================================
-//  ИИ БОТОВ
+//  НОВЫЙ КЛАСС: ЛЕСНЫЕ КРИПЫ (Neutral Creep)
+// =========================================================================
+
+class NeutralCreep extends Entity {
+    constructor(x, y, team, camp, type = 'weak') {
+        const isWeak = type === 'weak';
+        const hp = isWeak ? 450 : 850;
+        const damage = isWeak ? 22 : 40;
+        const speed = isWeak ? 280 : 290;
+        super(x, y, 'neutral', 14, hp, damage, speed);
+        this.camp = camp;
+        this.type = type;
+        this.leashRange = 700;
+        this.returnSpeed = this.speed * 0.8;
+        this.attackRange = 80;
+        this.attackSpeed = 0.9;
+        this.bountyGold = isWeak ? 50 : 100;
+        this.bountyXp = isWeak ? 40 : 80;
+        this._returning = false;
+        this._homeX = x;
+        this._homeY = y;
+        this._targetCheckTimer = 0;
+        this.isInCamp = true;
+    }
+
+    updateMovement(dt) {
+        const distFromHome = Math.hypot(this.x - this._homeX, this.y - this._homeY);
+        if (distFromHome > this.leashRange && !this.isDead) {
+            this._returning = true;
+            this.attackTarget = null;
+            this.targetX = this._homeX;
+            this.targetY = this._homeY;
+            this.speed = this.returnSpeed;
+        } else if (this._returning && distFromHome < 50) {
+            this._returning = false;
+            this.speed = this.baseSpeed;
+            this.targetX = this._homeX;
+            this.targetY = this._homeY;
+            this.isInCamp = true;
+        }
+
+        if (this.attackTarget && !this._returning) {
+            const d = Math.hypot(this.attackTarget.x - this.x, this.attackTarget.y - this.y);
+            if (d <= this.attackRange) {
+                this.targetX = this.x;
+                this.targetY = this.y;
+            } else {
+                this.targetX = this.attackTarget.x;
+                this.targetY = this.attackTarget.y;
+            }
+        } else if (this._returning) {
+            // already directed to home
+        }
+
+        super.updateMovement(dt);
+    }
+
+    findTarget() {
+        const enemies = [];
+        if (game.playerHero && !game.playerHero.isDead) enemies.push(game.playerHero);
+        if (game.enemyHero && !game.enemyHero.isDead) enemies.push(game.enemyHero);
+        for (let bot of game.alliedBots) if (!bot.isDead) enemies.push(bot);
+        for (let bot of game.enemyBots) if (!bot.isDead) enemies.push(bot);
+        for (let c of game.creeps) {
+            if (!c.isDead && c.team !== 'neutral') enemies.push(c);
+        }
+        const searchRadius = this.attackRange + 200;
+        let best = null;
+        let bestScore = -Infinity;
+        for (let e of enemies) {
+            if (e.isDead || e.team === this.team) continue;
+            const dist = Math.hypot(e.x - this.x, e.y - this.y);
+            if (dist > searchRadius) continue;
+            let score = 0;
+            if (e instanceof Hero) score = 100;
+            else if (e instanceof Creep) score = 50;
+            else if (e instanceof Spiderling || e instanceof WarlockGolem) score = 30;
+            else score = 10;
+            score -= dist * 0.1;
+            if (score > bestScore) {
+                bestScore = score;
+                best = e;
+            }
+        }
+        return best;
+    }
+
+    update(dt) {
+        if (this.isDead) return;
+        this.updateBuffs(dt);
+        if (this.attackCooldown > 0) this.attackCooldown -= dt;
+
+        this._targetCheckTimer += dt;
+        if (this._targetCheckTimer > 0.5 || !this.attackTarget || !this.attackTarget.isAttackable() || this.attackTarget.team === this.team) {
+            this._targetCheckTimer = 0;
+            const newTarget = this.findTarget();
+            if (newTarget) {
+                this.attackTarget = newTarget;
+                if (Math.hypot(this.x - this._homeX, this.y - this._homeY) > 100) {
+                    this.isInCamp = false;
+                }
+            } else {
+                this.attackTarget = null;
+            }
+        }
+
+        if (this.attackTarget && this.attackTarget.isAttackable() && !this.attackTarget.isDead && !this._returning) {
+            let d = Math.hypot(this.attackTarget.x - this.x, this.attackTarget.y - this.y);
+            if (d <= this.attackRange && this.attackCooldown <= 0) {
+                this.performAttack();
+            }
+        }
+
+        this.updateMovement(dt);
+    }
+
+    performAttack() {
+        if (!this.attackTarget || this.attackTarget.isDead) return;
+        this.attackCooldown = this.attackSpeed;
+        this.attackTarget.takeDamage(this.damage, this);
+    }
+
+    onDeath(attacker) {
+        if (attacker instanceof Hero) {
+            attacker.gold += this.bountyGold;
+            attacker.addXp(this.bountyXp);
+            if (attacker === game.playerHero) {
+                game.uiManager.addFloatingText(this.x, this.y - 15, `+${this.bountyGold} 🪙 (Neutral)`, '#ffd700');
+            }
+        }
+        const allHeroes = game.getAllHeroes();
+        for (let h of allHeroes) {
+            if (h.isDead) continue;
+            if (Math.hypot(h.x - this.x, h.y - this.y) < 600) {
+                h.addXp(this.bountyXp * 0.5);
+            }
+        }
+        if (this.camp) {
+            this.camp.onCreepDeath(this);
+        }
+    }
+
+    draw(ctx, camera) {
+        if (this.isDead) return;
+        this.drawShadow(ctx, camera);
+        let sx = this.x - camera.x;
+        let sy = this.y - camera.y;
+        ctx.save();
+        ctx.fillStyle = this.type === 'weak' ? '#8b8b00' : '#b8860b';
+        ctx.beginPath();
+        ctx.arc(sx, sy, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#4a4a00';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.restore();
+        this.drawHealthBar(ctx, camera);
+    }
+}
+
+// =========================================================================
+//  НОВЫЙ КЛАСС: ЛАГЕРЬ НЕЙТРАЛОВ
+// =========================================================================
+
+class NeutralCamp {
+    constructor(x, y, type, teamSide) {
+        this.x = x;
+        this.y = y;
+        this.type = type;
+        this.teamSide = teamSide;
+        this.radius = 160;
+        this.spawnTimer = 30;
+        this.spawnInterval = 30;
+        this.creeps = [];
+        this.isBlocked = false;
+        this._lastSpawnTime = 0;
+        this._initialSpawnDone = false;
+        this.spawnOffsets = [];
+        if (type === 'weak') {
+            this.spawnOffsets = [
+                {x: -30, y: -30},
+                {x: 30, y: -30},
+                {x: -30, y: 30},
+                {x: 30, y: 30}
+            ];
+        } else {
+            this.spawnOffsets = [
+                {x: -40, y: -20},
+                {x: 40, y: -20},
+                {x: 0, y: 30}
+            ];
+        }
+    }
+
+    isBlocked() {
+        const checkRadius = this.radius + 30;
+        const allHeroes = game.getAllHeroes();
+        for (let h of allHeroes) {
+            if (h.isDead) continue;
+            if (Math.hypot(h.x - this.x, h.y - this.y) < checkRadius) {
+                return true;
+            }
+        }
+        for (let c of game.creeps) {
+            if (c.isDead) continue;
+            if (c instanceof NeutralCreep && c.camp === this) continue;
+            if (Math.hypot(c.x - this.x, c.y - this.y) < checkRadius) {
+                return true;
+            }
+        }
+        for (let t of game.towers) {
+            if (t.isDead) continue;
+            if (Math.hypot(t.x - this.x, t.y - this.y) < checkRadius) {
+                return true;
+            }
+        }
+        for (let bot of [...game.alliedBots, ...game.enemyBots]) {
+            if (bot.isDead) continue;
+            if (Math.hypot(bot.x - this.x, bot.y - this.y) < checkRadius) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    spawn() {
+        const alive = this.creeps.filter(c => !c.isDead);
+        if (alive.length > 0) return false;
+
+        if (this.isBlocked()) {
+            this.isBlocked = true;
+            return false;
+        }
+        this.isBlocked = false;
+
+        for (let offset of this.spawnOffsets) {
+            const cx = this.x + offset.x + (Math.random() - 0.5) * 20;
+            const cy = this.y + offset.y + (Math.random() - 0.5) * 20;
+            const creep = new NeutralCreep(cx, cy, 'neutral', this, this.type);
+            this.creeps.push(creep);
+            game.creeps.push(creep);
+        }
+        this._lastSpawnTime = game.matchTime;
+        return true;
+    }
+
+    onCreepDeath(creep) {
+        const alive = this.creeps.filter(c => !c.isDead);
+        if (alive.length === 0) {
+            this.spawnTimer = this.spawnInterval;
+        }
+    }
+
+    update(dt) {
+        this.creeps = this.creeps.filter(c => !c.isDead);
+        this.spawnTimer -= dt;
+        if (this.spawnTimer <= 0) {
+            this.spawn();
+            if (this.creeps.length === 0) {
+                this.spawnTimer = 0.5;
+            } else {
+                this.spawnTimer = this.spawnInterval;
+            }
+        }
+    }
+
+    draw(ctx, camera) {
+        const sx = this.x - camera.x;
+        const sy = this.y - camera.y;
+        ctx.save();
+        ctx.globalAlpha = 0.15;
+        ctx.fillStyle = this.teamSide === 'radiant' ? '#00ff00' : '#ff0000';
+        ctx.beginPath();
+        ctx.arc(sx, sy, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 0.3;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.restore();
+        if (this.isBlocked) {
+            ctx.save();
+            ctx.strokeStyle = '#ff0000';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(sx - 10, sy - 10);
+            ctx.lineTo(sx + 10, sy + 10);
+            ctx.moveTo(sx + 10, sy - 10);
+            ctx.lineTo(sx - 10, sy + 10);
+            ctx.stroke();
+            ctx.restore();
+        }
+        ctx.save();
+        ctx.fillStyle = this.teamSide === 'radiant' ? '#66ff66' : '#ff6666';
+        ctx.beginPath();
+        ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+
+    getMinimapPos(mapWidth, mapHeight) {
+        return { x: (this.x / game.map.width) * mapWidth, y: (this.y / game.map.height) * mapHeight };
+    }
+}
+
+// =========================================================================
+//  ИИ БОТОВ (BotAI) — без изменений
 // =========================================================================
 
 class BotAI {
@@ -4266,7 +4555,7 @@ class BotAI {
 }
 
 // =========================================================================
-//  UI Менеджер
+//  UI Менеджер (UIManager)
 // =========================================================================
 
 class UIManager {
@@ -4477,8 +4766,20 @@ class UIManager {
         for (let c of game.creeps) {
             if (c.isDead) continue;
             const pos = toM(c.x, c.y);
-            mCtx.fillStyle = c.team === 'radiant' ? '#7cfc00' : '#8b008b';
+            if (c instanceof NeutralCreep) {
+                mCtx.fillStyle = '#ffaa00';
+            } else {
+                mCtx.fillStyle = c.team === 'radiant' ? '#7cfc00' : '#8b008b';
+            }
             mCtx.beginPath(); mCtx.arc(pos.x, pos.y, 1.5, 0, Math.PI*2); mCtx.fill();
+        }
+
+        for (let camp of game.neutralCamps) {
+            const pos = toM(camp.x, camp.y);
+            mCtx.fillStyle = camp.teamSide === 'radiant' ? '#66ff66' : '#ff6666';
+            mCtx.beginPath();
+            mCtx.arc(pos.x, pos.y, 3, 0, Math.PI * 2);
+            mCtx.fill();
         }
 
         if (game.playerHero && !game.playerHero.isDead) {
@@ -4523,7 +4824,7 @@ class UIManager {
 }
 
 // =========================================================================
-//  ОСНОВНОЙ КЛАСС ИГРЫ
+//  ОСНОВНОЙ КЛАСС ИГРЫ (Game)
 // =========================================================================
 
 class Game {
@@ -4561,9 +4862,28 @@ class Game {
         this.goldTimer = 0;
         this._teleportSelectionMode = false;
         this._relocateSelectionMode = false;
+        this.neutralCamps = [];
+        this.initNeutralCamps();
         this.initWorld(); 
         this.initInput();
         this.initShopItems();
+    }
+
+    initNeutralCamps() {
+        const campsData = [
+            { x: 1200, y: 3800, type: 'weak', side: 'radiant' },
+            { x: 1200, y: 1800, type: 'weak', side: 'radiant' },
+            { x: 800, y: 2800, type: 'strong', side: 'radiant' },
+            { x: 2500, y: 4200, type: 'strong', side: 'radiant' },
+            { x: 4800, y: 1800, type: 'weak', side: 'dire' },
+            { x: 4800, y: 3800, type: 'weak', side: 'dire' },
+            { x: 5200, y: 2800, type: 'strong', side: 'dire' },
+            { x: 3500, y: 800, type: 'strong', side: 'dire' }
+        ];
+        for (let data of campsData) {
+            const camp = new NeutralCamp(data.x, data.y, data.type, data.side);
+            this.neutralCamps.push(camp);
+        }
     }
 
     initShopItems() {
@@ -4742,11 +5062,23 @@ class Game {
     }
 
     radiantEntities() {
-        return [this.playerHero, ...this.alliedBots, ...this.creeps.filter(c => c.team==='radiant'), ...this.towers.filter(t => t.team==='radiant'), ...this.ancients.filter(a => a.team==='radiant')].filter(e => e && !e.isDead);
+        const result = [];
+        if (this.playerHero && !this.playerHero.isDead) result.push(this.playerHero);
+        for (let bot of this.alliedBots) if (!bot.isDead) result.push(bot);
+        for (let c of this.creeps) if (!c.isDead && c.team === 'radiant') result.push(c);
+        for (let t of this.towers) if (!t.isDead && t.team === 'radiant') result.push(t);
+        for (let a of this.ancients) if (!a.isDead && a.team === 'radiant') result.push(a);
+        return result;
     }
 
     direEntities() {
-        return [this.enemyHero, ...this.enemyBots, ...this.creeps.filter(c => c.team==='dire'), ...this.towers.filter(t => t.team==='dire'), ...this.ancients.filter(a => a.team==='dire')].filter(e => e && !e.isDead);
+        const result = [];
+        if (this.enemyHero && !this.enemyHero.isDead) result.push(this.enemyHero);
+        for (let bot of this.enemyBots) if (!bot.isDead) result.push(bot);
+        for (let c of this.creeps) if (!c.isDead && c.team === 'dire') result.push(c);
+        for (let t of this.towers) if (!t.isDead && t.team === 'dire') result.push(t);
+        for (let a of this.ancients) if (!a.isDead && a.team === 'dire') result.push(a);
+        return result;
     }
 
     spawnWave() {
@@ -4838,7 +5170,6 @@ class Game {
         });
 
         document.getElementById('minimapCanvas').addEventListener('click', (e) => {
-            // Сначала проверяем режим Relocate (для Io)
             const player = this.playerHero;
             if (player instanceof Io && player.isRelocateSelectMode) {
                 const mCanvas = document.getElementById('minimapCanvas');
@@ -4860,7 +5191,6 @@ class Game {
                 return;
             }
 
-            // Обычный телепорт
             if (!this._teleportSelectionMode || !this.playerHero || this.playerHero.isDead || this.playerHero.teleportCharges <= 0 || this.playerHero.isChannelingTeleport) {
                 return;
             }
@@ -4906,7 +5236,6 @@ class Game {
             if (k === 'p' || k === 'з') this.toggleShop();
             if (k === 'g' || k === 'п') this.activateGlyph();
             if (k === 't' || k === 'е') {
-                // Обычный телепорт
                 if (this.playerHero && !this.playerHero.isDead && this.playerHero.teleportCharges > 0 && !this.playerHero.isChannelingTeleport) {
                     this._teleportSelectionMode = !this._teleportSelectionMode;
                     if (this._teleportSelectionMode) {
@@ -5024,6 +5353,10 @@ class Game {
             else this.creeps[i].update(dt);
         }
 
+        for (let camp of this.neutralCamps) {
+            camp.update(dt);
+        }
+
         for (let t of this.towers) t.update(dt);
         for (let b of this.barracks) b.update(dt);
         if (this.bountyRunes) {
@@ -5056,6 +5389,9 @@ class Game {
             for (let rune of this.bountyRunes) rune.draw(ctx, this.camera);
         }
         for (let a of this.ancients) a.draw(ctx, this.camera);
+        for (let camp of this.neutralCamps) {
+            camp.draw(ctx, this.camera);
+        }
         for (let c of this.creeps) c.draw(ctx, this.camera);
 
         this.playerHero.draw(ctx, this.camera);
@@ -5165,7 +5501,60 @@ class Game {
     }
 }
 
-const game = new Game();
-document.querySelectorAll('.hero-card').forEach(card => {
-    card.addEventListener('click', () => game.start(card.getAttribute('data-hero')));
+// =========================================================================
+//  ИНИЦИАЛИЗАЦИЯ ИГРЫ И ВЫБОР ГЕРОЯ (исправлено)
+// =========================================================================
+
+let game = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    game = new Game();
+    const heroCards = document.querySelectorAll('.hero-card');
+    if (heroCards.length === 0) {
+        console.error('No hero cards found!');
+        return;
+    }
+    heroCards.forEach(card => {
+        card.addEventListener('click', function(e) {
+            const heroName = this.getAttribute('data-hero');
+            if (!heroName) {
+                console.error('No data-hero attribute');
+                return;
+            }
+            if (typeof game === 'undefined' || typeof game.start !== 'function') {
+                console.error('Game not initialized');
+                return;
+            }
+            try {
+                game.start(heroName);
+            } catch (err) {
+                console.error('Error starting game:', err);
+            }
+        });
+    });
 });
+
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    if (!game) {
+        game = new Game();
+    }
+    const heroCards = document.querySelectorAll('.hero-card');
+    if (heroCards.length > 0) {
+        heroCards.forEach(card => {
+            if (!card._listenerAttached) {
+                card._listenerAttached = true;
+                card.addEventListener('click', function(e) {
+                    const heroName = this.getAttribute('data-hero');
+                    if (!heroName) return;
+                    if (typeof game !== 'undefined' && typeof game.start === 'function') {
+                        try {
+                            game.start(heroName);
+                        } catch (err) {
+                            console.error('Error starting game:', err);
+                        }
+                    }
+                });
+            }
+        });
+    }
+}
