@@ -3043,7 +3043,6 @@ class Io extends Hero {
         super.draw(ctx, camera);
     }
 }
-
 // =========================================================================
 //  ВСПОМОГАТЕЛЬНЫЕ КЛАССЫ
 // =========================================================================
@@ -3129,6 +3128,10 @@ class Creep extends Entity {
 
     findTarget() {
         const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+        // Добавляем нейтральных крипов
+        const neutrals = game.creeps.filter(c => c.team === 'neutral' && !c.isDead && c.isAttackable());
+        enemies.push(...neutrals);
+        
         const searchRadius = this.attackRange * 1.5;
         let best = null;
         let bestDist = Infinity;
@@ -3285,6 +3288,9 @@ class Catapult extends Entity {
 
     findTarget() {
         const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+        const neutrals = game.creeps.filter(c => c.team === 'neutral' && !c.isDead && c.isAttackable());
+        enemies.push(...neutrals);
+        
         const searchRadius = this.attackRange * 1.5;
         let best = null;
         let bestDist = Infinity;
@@ -3416,6 +3422,9 @@ class Tower extends Entity {
         if (this.attackCooldown > 0) this.attackCooldown -= dt;
 
         const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+        const neutrals = game.creeps.filter(c => c.team === 'neutral' && !c.isDead && c.isAttackable());
+        enemies.push(...neutrals);
+        
         const inRange = enemies.filter(e => {
             if (e.isDead || !e.isAttackable()) return false;
             const dist = Math.hypot(e.x - this.x, e.y - this.y);
@@ -3970,10 +3979,10 @@ class NeutralCamp {
         this.type = type;
         this.teamSide = teamSide;
         this.radius = 160;
-        this.spawnTimer = 30;          // первый спавн через 30 секунд
-        this.spawnInterval = 30;       // интервал между спавнами, если крипы погибли
+        this.spawnTimer = 30;
+        this.spawnInterval = 30;
         this.creeps = [];
-        this.campBlocked = false;      // переименовано, чтобы не конфликтовать с методом isBlocked()
+        this.campBlocked = false;
         this._lastSpawnTime = 0;
         this._initialSpawnDone = false;
         this._lastSpawnAttemptTime = -10;
@@ -3994,7 +4003,6 @@ class NeutralCamp {
         }
     }
 
-    // Метод проверки блокировки (не переопределяется переменной)
     isBlocked() {
         const checkRadius = this.radius + 30;
         const allHeroes = game.getAllHeroes();
@@ -4017,7 +4025,6 @@ class NeutralCamp {
                 return true;
             }
         }
-        // Исправленный цикл по ботам — используем spread оператор для объединения массивов
         for (let bot of [...game.alliedBots, ...game.enemyBots]) {
             if (!bot || bot.isDead) continue;
             if (Math.hypot(bot.x - this.x, bot.y - this.y) < checkRadius) {
@@ -4031,7 +4038,6 @@ class NeutralCamp {
         const alive = this.creeps.filter(c => !c.isDead);
         if (alive.length > 0) return false;
 
-        // Используем метод isBlocked() для проверки
         if (this.isBlocked()) {
             this.campBlocked = true;
             return false;
@@ -4064,9 +4070,7 @@ class NeutralCamp {
             if (spawned) {
                 this.spawnTimer = this.spawnInterval;
             } else {
-                // Если спавн не удался (заблокировано или уже есть крипы),
-                // устанавливаем задержку, чтобы не проверять каждый кадр.
-                this.spawnTimer = 1.5; // проверяем раз в 1.5 секунды
+                this.spawnTimer = 1.5;
             }
         }
     }
@@ -4112,7 +4116,7 @@ class NeutralCamp {
 }
 
 // =========================================================================
-//  ИИ БОТОВ (BotAI) — без изменений
+//  ИИ БОТОВ (BotAI) — с исправлением selectTarget для нейтралов
 // =========================================================================
 
 class BotAI {
@@ -4195,7 +4199,6 @@ class BotAI {
 
         // Специфическая логика для Io
         if (hero instanceof Io) {
-            // 1. Tether: если нет связи, пытаемся привязаться
             if (!hero.tetherTarget && !hero._origSpeed) {
                 let target = null;
                 if (game.playerHero && game.playerHero.team === hero.team && !game.playerHero.isDead) {
@@ -4222,7 +4225,6 @@ class BotAI {
                 }
             }
 
-            // 2. Контроль дистанции до связанного союзника
             if (hero.tetherTarget) {
                 const dist = Math.hypot(hero.tetherTarget.x - hero.x, hero.tetherTarget.y - hero.y);
                 if (dist > 850) {
@@ -4240,7 +4242,6 @@ class BotAI {
                 }
             }
 
-            // 3. Использование способностей в бою
             if (hero.attackTarget && hero.attackTarget.team !== hero.team && !hero.attackTarget.isDead) {
                 if (hero.abilities[2].currentCooldown <= 0 && hero.mp >= 50 && !hero.overchargeActive) {
                     hero.useOvercharge();
@@ -4256,7 +4257,6 @@ class BotAI {
                 }
             }
 
-            // 4. Relocate (редко, в опасности)
             if (hero.abilities[3].currentCooldown <= 0 && hero.mp >= 100 && !hero.isRelocateActive && !hero.isRelocateChanneling) {
                 if (hero.tetherTarget && hero.tetherTarget.hp < hero.tetherTarget.maxHp * 0.3) {
                     const fountain = hero.team === 'radiant' ? game.fountains[0] : game.fountains[1];
@@ -4267,7 +4267,6 @@ class BotAI {
             }
         }
 
-        // Общая логика
         const hpPercent = hero.hp / hero.maxHp;
         if (hpPercent <= this.retreatThreshold && this.state !== 'heal') {
             this.state = 'retreat';
@@ -4465,6 +4464,10 @@ class BotAI {
     selectTarget() {
         const hero = this.hero;
         const enemies = hero.team === 'radiant' ? this.game.direEntities() : this.game.radiantEntities();
+        // Добавляем нейтральных крипов
+        const neutrals = this.game.creeps.filter(c => c.team === 'neutral' && !c.isDead && c.isAttackable());
+        enemies.push(...neutrals);
+        
         const attackRange = hero.attackRange * 1.2;
 
         let closestHero = null;
@@ -5145,6 +5148,12 @@ class Game {
             }
             for (let c of this.creeps) {
                 if (c.team === enemyTeam && !c.isDead && c.isAttackable()) possibleTargets.push(c);
+            }
+            // Добавляем нейтральных крипов
+            for (let c of this.creeps) {
+                if (c.team === 'neutral' && !c.isDead && c.isAttackable()) {
+                    possibleTargets.push(c);
+                }
             }
             for (let t of this.towers) {
                 if (t.team === enemyTeam && !t.isDead && t.isAttackable()) possibleTargets.push(t);
