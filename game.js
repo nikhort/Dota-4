@@ -4833,7 +4833,7 @@ class UIManager {
 }
 
 // =========================================================================
-//  ОСНОВНОЙ КЛАСС ИГРЫ (Game)
+//  ОСНОВНОЙ КЛАСС ИГРЫ (Game) — С НОВОЙ ЛОГИКОЙ ВЫБОРА РОЛЕЙ И БОТОВ
 // =========================================================================
 
 class Game {
@@ -4876,6 +4876,99 @@ class Game {
         this.initWorld(); 
         this.initInput();
         this.initShopItems();
+    }
+
+    // Новая функция: выбор героя для бота по роли
+    pickHeroForRole(role, usedHeroes) {
+        const allHeroes = ['Morphling', 'Warlock', 'Sniper', 'Bristleback', 'Huskar', 'Anti-Mage', 'Broodmother', 'Io'];
+        const supportPool = ['Io', 'Warlock'];
+        const midPool = ['Sniper', 'Huskar', 'Broodmother'];
+        const carryPool = ['Anti-Mage', 'Morphling', 'Huskar', 'Bristleback', 'Sniper'];
+        const offlanePool = allHeroes.filter(h => !supportPool.includes(h));
+
+        let pool;
+        if (role === 4 || role === 5) pool = supportPool;
+        else if (role === 2) pool = midPool;
+        else if (role === 1) pool = carryPool;
+        else if (role === 3) pool = offlanePool;
+        else pool = allHeroes;
+
+        const available = pool.filter(h => !usedHeroes.includes(h));
+        if (available.length === 0) {
+            const anyAvailable = allHeroes.filter(h => !usedHeroes.includes(h));
+            return anyAvailable.length > 0 ? anyAvailable[Math.floor(Math.random() * anyAvailable.length)] : allHeroes[0];
+        }
+        return available[Math.floor(Math.random() * available.length)];
+    }
+
+    // Определение линии по роли и команде
+    getLaneForRole(role, team) {
+        if (role === 2) return 'mid';
+        if (team === 'radiant') {
+            return (role === 1 || role === 5) ? 'bottom' : 'top';
+        } else { // dire
+            return (role === 1 || role === 5) ? 'top' : 'bottom';
+        }
+    }
+
+    start(role, selectedHeroName) {
+        audio.init();
+        const allRoles = [1,2,3,4,5];
+        const playerRole = role;
+        const remainingRoles = allRoles.filter(r => r !== playerRole);
+
+        // Создаём игрока
+        const radiantStart = this.map.radiantBase;
+        this.playerHero = this.createHero(selectedHeroName, radiantStart.x, radiantStart.y, 'radiant', playerRole);
+        this.playerHero.role = playerRole; // сохраняем роль
+
+        // Союзные боты (Radiant)
+        const usedHeroes = [selectedHeroName];
+        for (let r of remainingRoles) {
+            const heroName = this.pickHeroForRole(r, usedHeroes);
+            usedHeroes.push(heroName);
+            const lane = this.getLaneForRole(r, 'radiant');
+            // Стартовая позиция - база с небольшим смещением
+            const startX = radiantStart.x + (r * 30) - 60;
+            const startY = radiantStart.y - (r * 20) - 40;
+            const hero = this.createHero(heroName, startX, startY, 'radiant', r);
+            hero.role = r;
+            hero.ai = new BotAI(hero, lane, this);
+            this.alliedBots.push(hero);
+        }
+
+        // Вражеская команда (Dire)
+        // Случайно выбираем роль для вражеского героя
+        const enemyRole = allRoles[Math.floor(Math.random() * allRoles.length)];
+        const direStart = this.map.direBase;
+        const enemyHeroName = this.pickHeroForRole(enemyRole, []);
+        this.enemyHero = this.createHero(enemyHeroName, direStart.x, direStart.y, 'dire', enemyRole);
+        this.enemyHero.role = enemyRole;
+        const enemyUsedHeroes = [enemyHeroName];
+        const enemyRemainingRoles = allRoles.filter(r => r !== enemyRole);
+        for (let r of enemyRemainingRoles) {
+            const heroName = this.pickHeroForRole(r, enemyUsedHeroes);
+            enemyUsedHeroes.push(heroName);
+            const lane = this.getLaneForRole(r, 'dire');
+            const startX = direStart.x - (r * 30) + 60;
+            const startY = direStart.y + (r * 20) + 40;
+            const hero = this.createHero(heroName, startX, startY, 'dire', r);
+            hero.role = r;
+            hero.ai = new BotAI(hero, lane, this);
+            this.enemyBots.push(hero);
+        }
+
+        // Назначаем AI для вражеского героя
+        const enemyLane = this.getLaneForRole(enemyRole, 'dire');
+        this.enemyHero.ai = new BotAI(this.enemyHero, enemyLane, this);
+
+        // Скрываем экраны выбора и показываем игру
+        document.getElementById('role-selection').classList.add('hidden');
+        document.getElementById('hero-selection').classList.add('hidden');
+        document.getElementById('game-screen').classList.remove('hidden');
+
+        this.lastTime = performance.now();
+        requestAnimationFrame((t) => this.loop(t));
     }
 
     initNeutralCamps() {
@@ -5023,51 +5116,19 @@ class Game {
         }
     }
 
-    start(selectedHeroName) {
-        audio.init();
-        this.playerHero = this.createHero(selectedHeroName, this.map.radiantBase.x, this.map.radiantBase.y, 'radiant');
-        const pool = ['Morphling', 'Warlock', 'Sniper', 'Bristleback', 'Huskar', 'Anti-Mage', 'Broodmother', 'Io'];
-        this.enemyHero = this.createHero(pool[Math.floor(Math.random() * pool.length)], this.map.direBase.x, this.map.direBase.y, 'dire');
-        this.enemyHero.ai = new BotAI(this.enemyHero, 'mid', this);
-
-        const alliedLanes = ['top', 'bottom'];
-        for (let lane of alliedLanes) {
-            for (let i = 0; i < 2; i++) {
-                let name = pool[Math.floor(Math.random() * pool.length)];
-                const x = this.map.radiantBase.x + 100 + i * 80;
-                const y = this.map.radiantBase.y - 100 + i * 80;
-                const hero = this.createHero(name, x, y, 'radiant');
-                hero.ai = new BotAI(hero, lane, this);
-                this.alliedBots.push(hero);
-            }
-        }
-
-        for (let lane of alliedLanes) {
-            for (let i = 0; i < 2; i++) {
-                let name = pool[Math.floor(Math.random() * pool.length)];
-                const x = this.map.direBase.x - 100 - i * 80;
-                const y = this.map.direBase.y + 100 + i * 80;
-                const hero = this.createHero(name, x, y, 'dire');
-                hero.ai = new BotAI(hero, lane, this);
-                this.enemyBots.push(hero);
-            }
-        }
-
-        document.getElementById('hero-selection').classList.add('hidden');
-        document.getElementById('game-screen').classList.remove('hidden');
-        this.lastTime = performance.now(); 
-        requestAnimationFrame((t) => this.loop(t));
-    }
-
-    createHero(name, x, y, team) {
-        if (name === 'Morphling') return new Morphling(x, y, team);
-        if (name === 'Warlock') return new Warlock(x, y, team);
-        if (name === 'Bristleback') return new Bristleback(x, y, team);
-        if (name === 'Huskar') return new Huskar(x, y, team);
-        if (name === 'Anti-Mage') return new AntiMage(x, y, team);
-        if (name === 'Broodmother') return new Broodmother(x, y, team);
-        if (name === 'Io') return new Io(x, y, team);
-        return new Sniper(x, y, team);
+    createHero(name, x, y, team, role) {
+        let hero;
+        if (name === 'Morphling') hero = new Morphling(x, y, team);
+        else if (name === 'Warlock') hero = new Warlock(x, y, team);
+        else if (name === 'Sniper') hero = new Sniper(x, y, team);
+        else if (name === 'Bristleback') hero = new Bristleback(x, y, team);
+        else if (name === 'Huskar') hero = new Huskar(x, y, team);
+        else if (name === 'Anti-Mage') hero = new AntiMage(x, y, team);
+        else if (name === 'Broodmother') hero = new Broodmother(x, y, team);
+        else if (name === 'Io') hero = new Io(x, y, team);
+        else hero = new Sniper(x, y, team);
+        hero.role = role;
+        return hero;
     }
 
     radiantEntities() {
@@ -5521,55 +5582,38 @@ class Game {
 // =========================================================================
 
 let game = null;
+let selectedRole = 0;
 
 document.addEventListener('DOMContentLoaded', function() {
     game = new Game();
+
+    // Обработчики для выбора роли
+    const roleBtns = document.querySelectorAll('.role-btn');
+    roleBtns.forEach(btn => {
+        btn.addEventListener('click', function() {
+            selectedRole = parseInt(this.dataset.role);
+            document.getElementById('role-selection').classList.add('hidden');
+            document.getElementById('hero-selection').classList.remove('hidden');
+        });
+    });
+
+    // Обработчики для выбора героя
     const heroCards = document.querySelectorAll('.hero-card');
-    if (heroCards.length === 0) {
-        console.error('No hero cards found!');
-        return;
-    }
     heroCards.forEach(card => {
-        card.addEventListener('click', function(e) {
+        card.addEventListener('click', function() {
             const heroName = this.getAttribute('data-hero');
-            if (!heroName) {
-                console.error('No data-hero attribute');
+            if (!heroName) return;
+            if (selectedRole === 0) {
+                alert('Please select a position first!');
                 return;
             }
-            if (typeof game === 'undefined' || typeof game.start !== 'function') {
-                console.error('Game not initialized');
-                return;
-            }
-            try {
-                game.start(heroName);
-            } catch (err) {
-                console.error('Error starting game:', err);
+            if (typeof game !== 'undefined' && typeof game.start === 'function') {
+                try {
+                    game.start(selectedRole, heroName);
+                } catch (err) {
+                    console.error('Error starting game:', err);
+                }
             }
         });
     });
 });
-
-if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    if (!game) {
-        game = new Game();
-    }
-    const heroCards = document.querySelectorAll('.hero-card');
-    if (heroCards.length > 0) {
-        heroCards.forEach(card => {
-            if (!card._listenerAttached) {
-                card._listenerAttached = true;
-                card.addEventListener('click', function(e) {
-                    const heroName = this.getAttribute('data-hero');
-                    if (!heroName) return;
-                    if (typeof game !== 'undefined' && typeof game.start === 'function') {
-                        try {
-                            game.start(heroName);
-                        } catch (err) {
-                            console.error('Error starting game:', err);
-                        }
-                    }
-                });
-            }
-        });
-    }
-}

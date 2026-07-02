@@ -6,7 +6,20 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>  
-    <div id="hero-selection" class="screen">
+    <!-- НОВЫЙ ЭКРАН ВЫБОРА ПОЗИЦИИ -->
+    <div id="role-selection" class="screen">
+        <h1 class="title">SELECT YOUR POSITION</h1>
+        <div class="role-container">
+            <button class="role-btn" data-role="1">1 - Carry</button>
+            <button class="role-btn" data-role="2">2 - Mid</button>
+            <button class="role-btn" data-role="3">3 - Offlane</button>
+            <button class="role-btn" data-role="4">4 - Support</button>
+            <button class="role-btn" data-role="5">5 - Hard Support</button>
+        </div>
+    </div>
+
+    <!-- ЭКРАН ВЫБОРА ГЕРОЯ (был изначально) -->
+    <div id="hero-selection" class="screen hidden">
         <h1 class="title">CHOOSE YOUR HERO</h1>
         <div class="hero-container">
             <div class="hero-card" data-hero="Morphling">
@@ -52,6 +65,7 @@
         </div>
     </div>
 
+    <!-- ИГРОВОЙ ЭКРАН -->
     <div id="game-screen" class="screen hidden">
         <canvas id="gameCanvas"></canvas>
 

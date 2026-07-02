@@ -29,6 +29,44 @@ body, html {
     display: none !important;
 }
 
+/* Экран выбора роли */
+#role-selection {
+    background: radial-gradient(circle at center, #1a2333 0%, #0d111a 100%);
+    align-items: center;
+    justify-content: center;
+    z-index: 15;
+}
+
+.role-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+    justify-content: center;
+    max-width: 700px;
+    margin-top: 40px;
+}
+
+.role-btn {
+    background: #1e2d42;
+    border: 2px solid #3182ce;
+    border-radius: 10px;
+    padding: 20px 35px;
+    font-size: 20px;
+    font-weight: bold;
+    color: #e2e8f0;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    min-width: 160px;
+    text-shadow: 0 0 10px rgba(49, 130, 206, 0.3);
+}
+
+.role-btn:hover {
+    transform: scale(1.05);
+    border-color: #00bfff;
+    box-shadow: 0 0 25px rgba(0, 191, 255, 0.4);
+    background: #2d3f57;
+}
+
 /* Экран выбора героя */
 #hero-selection {
     background: radial-gradient(circle at center, #1a2333 0%, #0d111a 100%);
