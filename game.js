@@ -325,6 +325,18 @@ class Inventory {
         if (item.stats.manaRegenBonus) this.owner.inventoryManaRegen = (this.owner.inventoryManaRegen || 0) + item.stats.manaRegenBonus * factor;
         if (item.stats.hpRegen) this.owner.inventoryHpRegen = (this.owner.inventoryHpRegen || 0) + item.stats.hpRegen * factor;
         if (item.stats.armorBonus) this.owner.armor = (this.owner.armor || 0) + item.stats.armorBonus * factor;
+        // Новая поддержка уклонения
+        if (item.stats.evasion) {
+            if (!this.owner.evasion) this.owner.evasion = 0;
+            this.owner.evasion += item.stats.evasion * factor;
+            // Ограничим уклонение 90% (максимум)
+            if (this.owner.evasion > 0.9) this.owner.evasion = 0.9;
+        }
+        // Поддержка agility (для будущего использования)
+        if (item.stats.agility) {
+            if (!this.owner.agility) this.owner.agility = 0;
+            this.owner.agility += item.stats.agility * factor;
+        }
     }
     removeItemAt(index) {
         const item = this.slots[index];
@@ -360,6 +372,8 @@ class Entity {
         this._stuckTime = 0;
         this.counterspellActive = false;
         this.counterspellTimer = 0;
+        // Уклонение (по умолчанию 0)
+        this.evasion = 0;
     }
 
     isAttackable() {
@@ -608,6 +622,8 @@ class Hero extends Entity {
         
         this.respawnTimer = 0;
         this.isRespawning = false;
+        // Уклонение (уже есть в Entity)
+        this.evasion = 0;
     }
 
     getHpRegen() {
@@ -852,6 +868,15 @@ class Hero extends Entity {
             this.cancelTeleport('ability');
             return;
         }
+        // Проверка уклонения у цели
+        if (this.attackTarget && this.attackTarget.evasion > 0) {
+            if (Math.random() < this.attackTarget.evasion) {
+                game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS', '#ff6666');
+                this.attackCooldown = this.attackSpeed; // всё равно перезаряжаем
+                return;
+            }
+        }
+        // Далее стандартная атака
         if (this.attackTarget && this.attackTarget.inventory) {
             const radianceItem = this.attackTarget.inventory.items.find(item => item.id === 'radiance');
             if (radianceItem) {
@@ -1552,11 +1577,8 @@ class Bristleback extends Hero {
 
     performAttack() {
         if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
-        this.attackCooldown = this.attackSpeed;
-        audio.play('attack');
-        let finalDamage = this.damage + this.getWarpathDamageBonus();
-        if (this.vladmirAura) finalDamage *= 1.18;
-        game.projectiles.push(new Projectile(this.x, this.y, this.attackTarget, finalDamage, this.team, this));
+        // Проверка уклонения у цели (уже в родительском методе)
+        super.performAttack();
     }
 
     takeDamage(amount, attacker, isFb = false, damageType = 'physical') {
@@ -1673,16 +1695,8 @@ class Sniper extends Hero {
     performAttack() {
         if (this.assChannel > 0) return;
         if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
-        this.attackCooldown = this.attackSpeed; audio.play('attack');
-        
-        let hsChance = this.aimTimer > 0 ? 0.60 : 0.30;
-        let isHs = Math.random() < hsChance; 
-        let dmg = this.damage;
-        if (isHs) { dmg += 20; }
-        
-        let p = new Projectile(this.x, this.y, this.attackTarget, dmg, this.team, this);
-        if (isHs) p.isHs = true;
-        game.projectiles.push(p);
+        // Проверка уклонения у цели (в родителе)
+        super.performAttack();
     }
 
     draw(ctx, camera) {
@@ -1802,23 +1816,8 @@ class Huskar extends Hero {
 
     performAttack() {
         if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
-        this.attackCooldown = this.attackSpeed; audio.play('attack');
-        let finalDamage = this.damage;
-        if (this.vladmirAura) finalDamage *= 1.18;
-
-        let isBurning = this.burningSpearActive;
-        if (isBurning) {
-            let cost = this.maxHp * 0.02;
-            if (this.hp > cost) {
-                this.hp -= cost;
-            } else {
-                isBurning = false; 
-            }
-        }
-
-        let proj = new Projectile(this.x, this.y, this.attackTarget, finalDamage, this.team, this);
-        proj.isBurningSpear = isBurning;
-        game.projectiles.push(proj);
+        // Проверка уклонения (в родителе)
+        super.performAttack();
     }
 }
 
@@ -1847,25 +1846,8 @@ class AntiMage extends Hero {
 
     performAttack() {
         if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
-        this.attackCooldown = this.attackSpeed;
-        audio.play('attack');
-        let finalDamage = this.damage;
-        if (this.vladmirAura) finalDamage *= 1.18;
-
-        let critChance = 0;
-        let critMultiplier = 1;
-        for (let item of this.inventory.items) {
-            if (item.stats?.critChance) critChance = Math.max(critChance, item.stats.critChance);
-            if (item.stats?.critMultiplier) critMultiplier = Math.max(critMultiplier, item.stats.critMultiplier);
-        }
-
-        let proj = new Projectile(this.x, this.y, this.attackTarget, finalDamage, this.team, this);
-        proj.isManaBreak = true;
-        if (Math.random() < critChance) {
-            proj.isCrit = true;
-            proj.damage = Math.max(1, proj.damage * critMultiplier);
-        }
-        game.projectiles.push(proj);
+        // Проверка уклонения (в родителе)
+        super.performAttack();
     }
 
     useAbility(idx) {
@@ -2128,31 +2110,8 @@ class Broodmother extends Hero {
 
     performAttack() {
         if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
-        this.attackCooldown = this.attackSpeed;
-        audio.play('attack');
-
-        let finalDamage = this.damage;
-        if (this.vladmirAura) finalDamage *= 1.18;
-
-        let critChance = 0;
-        let critMultiplier = 1;
-        for (let item of this.inventory.items) {
-            if (item.stats?.critChance) critChance = Math.max(critChance, item.stats.critChance);
-            if (item.stats?.critMultiplier) critMultiplier = Math.max(critMultiplier, item.stats.critMultiplier);
-        }
-
-        const target = this.attackTarget;
-        if (target && !target.isDead && target.team !== this.team) {
-            this.applyIncapacitatingBite(target);
-        }
-
-        let proj = new Projectile(this.x, this.y, this.attackTarget, finalDamage, this.team, this);
-        proj.isBroodmotherAttack = true;
-        if (Math.random() < critChance) {
-            proj.isCrit = true;
-            proj.damage = Math.max(1, proj.damage * critMultiplier);
-        }
-        game.projectiles.push(proj);
+        // Проверка уклонения (в родителе)
+        super.performAttack();
     }
 
     useSpawnSpiderlings(target) {
@@ -2412,6 +2371,12 @@ class Spiderling extends Entity {
 
     performAttack() {
         if (!this.attackTarget || this.attackTarget.isDead) return;
+        // Проверка уклонения у цели
+        if (this.attackTarget.evasion > 0 && Math.random() < this.attackTarget.evasion) {
+            game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS', '#ff6666');
+            this.attackCooldown = this.attackSpeed;
+            return;
+        }
         this.attackCooldown = this.attackSpeed;
         let damage = this.damage;
         if (this.hungerLifesteal > 0) {
@@ -2974,36 +2939,8 @@ class Io extends Hero {
             this.cancelTeleport('ability');
             return;
         }
-        if (this.attackTarget && this.attackTarget.inventory) {
-            const radianceItem = this.attackTarget.inventory.items.find(item => item.id === 'radiance');
-            if (radianceItem) {
-                const d = Math.hypot(this.x - this.attackTarget.x, this.y - this.attackTarget.y);
-                if (d <= 500) {
-                    if (Math.random() < 0.05) {
-                        game.uiManager.addFloatingText(this.x, this.y - 20, "MISS", '#ff6666');
-                        return;
-                    }
-                }
-            }
-        }
-
-        this.attackCooldown = this.attackSpeed;
-        audio.play('attack');
-        let finalDamage = this.damage;
-        if (this.vladmirAura) finalDamage *= 1.18;
-        let critChance = 0;
-        let critMultiplier = 1;
-        for (let item of this.inventory.items) {
-            if (item.stats?.critChance) critChance = Math.max(critChance, item.stats.critChance);
-            if (item.stats?.critMultiplier) critMultiplier = Math.max(critMultiplier, item.stats.critMultiplier);
-        }
-
-        let proj = new Projectile(this.x, this.y, this.attackTarget, finalDamage, this.team, this);
-        if (Math.random() < critChance) {
-            proj.isCrit = true;
-            proj.damage = Math.max(1, proj.damage * critMultiplier);
-        }
-        game.projectiles.push(proj);
+        // Проверка уклонения (в родителе)
+        super.performAttack();
     }
 
     drawTether(ctx, camera) {
@@ -3210,6 +3147,11 @@ class Creep extends Entity {
                 let finalDamage = this.damage;
                 if (this.vladmirAura) finalDamage *= 1.18;
                 if (this.type === 'melee') {
+                    // Проверка уклонения у цели
+                    if (this.attackTarget.evasion > 0 && Math.random() < this.attackTarget.evasion) {
+                        game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS', '#ff6666');
+                        return;
+                    }
                     this.attackTarget.takeDamage(finalDamage, this);
                     if (this.vladmirAura) {
                         let lifesteal = finalDamage * 0.20;
@@ -3374,6 +3316,7 @@ class Catapult extends Entity {
 
     performAttack() {
         if (!this.attackTarget || this.attackTarget.isDead) return;
+        // Проверка уклонения у цели (для снарядов уклонение проверяется при попадании)
         let damage = this.damage;
         if (this.attackTarget instanceof Tower || this.attackTarget instanceof Ancient) {
             damage *= 2;
@@ -3615,6 +3558,19 @@ class Projectile {
         let dy = this.target.y - this.y;
         let dist = Math.hypot(dx, dy);
         if (dist < 12) {
+            // Проверка уклонения у цели (для снарядов от обычных атак)
+            // Но если это способность или магия, уклонение не работает
+            let isMagicDamage = false;
+            if (this.isAss || this.isBurningSpear || this.isManaBreak) {
+                // Эти типы могут быть магией или особыми, не проверяем уклонение
+            } else {
+                // Для обычных атак проверяем уклонение
+                if (this.target.evasion > 0 && Math.random() < this.target.evasion) {
+                    game.uiManager.addFloatingText(this.target.x, this.target.y - 30, 'MISS', '#ff6666');
+                    return true;
+                }
+            }
+
             if (this.isManaBreak && this.attacker instanceof AntiMage) {
                 const target = this.target;
                 if (target.maxMp > 0) {
@@ -3954,6 +3910,12 @@ class NeutralCreep extends Entity {
 
     performAttack() {
         if (!this.attackTarget || this.attackTarget.isDead) return;
+        // Проверка уклонения
+        if (this.attackTarget.evasion > 0 && Math.random() < this.attackTarget.evasion) {
+            game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS', '#ff6666');
+            this.attackCooldown = this.attackSpeed;
+            return;
+        }
         this.attackCooldown = this.attackSpeed;
         this.attackTarget.takeDamage(this.damage, this);
     }
@@ -4144,7 +4106,7 @@ class NeutralCamp {
 }
 
 // =========================================================================
-//  ИИ БОТОВ (BotAI) — с исправлением selectTarget для нейтралов
+//  ИИ БОТОВ (BotAI) — с исправлением selectTarget для нейтралов и добавлением Butterfly
 // =========================================================================
 
 class BotAI {
@@ -4164,23 +4126,23 @@ class BotAI {
         this.buildTimer = 0;
         const name = hero.name;
         if (name === 'Huskar') {
-            this.build = ['ringhealth', 'vitality', 'ringtarrasque', 'reaver'];
-            this.finalItems = ['vanguard', 'heart'];
+            this.build = ['ringhealth', 'vitality', 'ringtarrasque', 'reaver', 'butterfly'];
+            this.finalItems = ['vanguard', 'heart', 'butterfly'];
         } else if (name === 'Anti-Mage') {
-            this.build = ['radiance'];
-            this.finalItems = ['radiance'];
+            this.build = ['radiance', 'butterfly'];
+            this.finalItems = ['radiance', 'butterfly'];
         } else if (name === 'Sniper') {
-            this.build = ['sword'];
-            this.finalItems = ['sword'];
+            this.build = ['sword', 'butterfly'];
+            this.finalItems = ['sword', 'butterfly'];
         } else if (name === 'Morphling') {
-            this.build = ['vladmir', 'linkens'];
-            this.finalItems = ['vladmir', 'linkens'];
+            this.build = ['vladmir', 'linkens', 'butterfly'];
+            this.finalItems = ['vladmir', 'linkens', 'butterfly'];
         } else if (name === 'Warlock') {
             this.build = ['radiance', 'ringtarrasque', 'reaver'];
             this.finalItems = ['radiance', 'heart'];
         } else if (name === 'Broodmother') {
-            this.build = ['ringhealth', 'vitality', 'ringtarrasque', 'reaver'];
-            this.finalItems = ['vanguard', 'heart'];
+            this.build = ['ringhealth', 'vitality', 'ringtarrasque', 'reaver', 'butterfly'];
+            this.finalItems = ['vanguard', 'heart', 'butterfly'];
         } else if (name === 'Io') {
             this.build = ['ringhealth', 'vitality', 'ringtarrasque', 'reaver'];
             this.finalItems = ['vanguard', 'heart'];
@@ -4470,7 +4432,8 @@ class BotAI {
             'radiance': 1500,
             'sword': 1500,
             'vladmir': 1500,
-            'linkens': 1500
+            'linkens': 1500,
+            'butterfly': 2500
         };
         return costs[itemId] || 0;
     }
@@ -4484,7 +4447,8 @@ class BotAI {
             'radiance': new Item('radiance', 'Radiance', 1500, { damageBonus: 20 }),
             'sword': new Item('sword', 'Crystalys', 1500, { damageBonus: 32, critChance: 0.3, critMultiplier: 1.6 }),
             'vladmir': new Item('vladmir', "Vladmir's Offering", 1500, { manaRegen: 0.75, armorBonus: 1 }),
-            'linkens': new Item('linkens', "Linken's Sphere", 1500, { hp: 200, mana: 200, damage: 15, manaRegen: 5 })
+            'linkens': new Item('linkens', "Linken's Sphere", 1500, { hp: 200, mana: 200, damage: 15, manaRegen: 5 }),
+            'butterfly': new Item('butterfly', 'Butterfly', 2500, { agility: 35, evasion: 0.35, damage: 25 })
         };
         return items[itemId] || null;
     }
@@ -4861,7 +4825,7 @@ class UIManager {
 }
 
 // =========================================================================
-//  ОСНОВНОЙ КЛАСС ИГРЫ (Game) — С НОВОЙ ЛОГИКОЙ ВЫБОРА РОЛЕЙ И БОТОВ
+//  ОСНОВНОЙ КЛАСС ИГРЫ (Game) — С НОВОЙ ЛОГИКОЙ ВЫБОРА РОЛЕЙ И БОТОВ, ДОБАВЛЕН BUTTERFLY
 // =========================================================================
 
 class Game {
@@ -5019,7 +4983,23 @@ class Game {
     initShopItems() {
         const shopList = document.querySelector('.shop-items-list');
         if (!shopList) return;
-        if (shopList.querySelector('[data-item="ringtarrasque"]')) return;
+        if (shopList.querySelector('[data-item="butterfly"]')) return;
+
+        const butterflyItem = document.createElement('div');
+        butterflyItem.className = 'shop-item';
+        butterflyItem.setAttribute('data-item', 'butterfly');
+        butterflyItem.innerHTML = `
+            <img class="shop-item-icon" src="images/butterfly_icon.png" alt="Butterfly">
+            <div class="shop-item-info">
+                <h3>🦋 Butterfly</h3>
+                <p>Price: 2500 🪙</p>
+                <p>+35 Agility</p>
+                <p>+35% Evasion</p>
+                <p>+25 Damage</p>
+            </div>
+        `;
+        butterflyItem.addEventListener('click', () => this.buyItem('butterfly'));
+        shopList.appendChild(butterflyItem);
 
         const ringItem = document.createElement('div');
         ringItem.className = 'shop-item';
@@ -5402,6 +5382,7 @@ class Game {
         if (type === 'ringtarrasque') it = new Item('ringtarrasque', 'Ring of Tarrasque', 1700, { hpRegen: 12 });
         if (type === 'reaver') it = new Item('reaver', 'Reaver', 2500, { hp: 25 });
         if (type === 'radiance') it = new Item('radiance', 'Radiance', 1500, { damageBonus: 20 });
+        if (type === 'butterfly') it = new Item('butterfly', 'Butterfly', 2500, { agility: 35, evasion: 0.35, damage: 25 });
         if (it && p.gold >= it.cost && p.inventory.addItem(it)) { 
             p.gold -= it.cost; audio.play('buy');
             if (it.id === 'vladmir') { p.hasVladmir = true; }
