@@ -605,6 +605,9 @@ class Hero extends Entity {
         this.teleportChannelTimer = 0;
         this.teleportStartX = 0;
         this.teleportStartY = 0;
+        
+        this.respawnTimer = 0;
+        this.isRespawning = false;
     }
 
     getHpRegen() {
@@ -724,9 +727,14 @@ class Hero extends Entity {
 
         this.teleportCharges = Math.min(1, this.teleportCharges + 1);
         this.cancelTeleport('death');
+        
+        this.respawnTimer = 10;
+        this.isRespawning = true;
 
         setTimeout(() => {
             this.isDead = false; this.hp = this.maxHp; this.mp = this.maxMp;
+            this.isRespawning = false;
+            this.respawnTimer = 0;
             if (this.team === 'radiant') {
                 this.x = game.map.radiantBase.x;
                 this.y = game.map.radiantBase.y;
@@ -742,7 +750,7 @@ class Hero extends Entity {
                 this.assChannel = 0;
                 this.assTarget = null; 
             }
-        }, 5000);
+        }, 10000);
     }
 
     addXp(amount) {
@@ -762,6 +770,9 @@ class Hero extends Entity {
     }
 
     update(dt) {
+        if (this.isRespawning && this.respawnTimer > 0) {
+            this.respawnTimer -= dt;
+        }
         if (this.isDead) return;
         this.updateTeleport(dt);
 
@@ -896,9 +907,27 @@ class Hero extends Entity {
     }
 
     draw(ctx, camera) {
-        if (this.isDead) return;
-        this.drawShadow(ctx, camera);
         let sx = this.x - camera.x; let sy = this.y - camera.y;
+        
+        if (this.isDead) {
+            if (this.isRespawning && this.respawnTimer > 0) {
+                ctx.save();
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                ctx.fillRect(sx - 40, sy - 60, 80, 50);
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 24px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(Math.ceil(this.respawnTimer) + 's', sx, sy - 35);
+                ctx.fillStyle = '#ff9999';
+                ctx.font = 'bold 12px Arial';
+                ctx.fillText('RESPAWN', sx, sy - 10);
+                ctx.restore();
+            }
+            return;
+        }
+        
+        this.drawShadow(ctx, camera);
         let bob = Math.sin(performance.now() * 0.01) * 2.5;
 
         ctx.save(); ctx.translate(sx, sy + bob);
@@ -926,10 +955,10 @@ class Hero extends Entity {
 class Morphling extends Hero {
     constructor(x, y, team) {
         super(x, y, team, 'Morphling');
-        this.attackRange = 250; 
-        this.baseStrength = 22;
-        this.baseAgility = 24;
-        this.minStatLimit = 5; 
+        this.attackRange = 270; 
+        this.baseStrength = 28;
+        this.baseAgility = 28;
+        this.minStatLimit = 6; 
         this.morphBaseHp = this.maxHp;
         this.morphBaseDamage = this.damage;
 
@@ -1112,7 +1141,7 @@ class AdaptiveStrikeProjectile {
 // ----- Warlock -----
 class Warlock extends Hero {
     constructor(x, y, team) {
-        super(x, y, team, 'Warlock'); this.attackRange = 380;
+        super(x, y, team, 'Warlock'); this.attackRange = 370;
         this.abilities.push(new Ability('Fatal Bonds', 'active', 20, 120, 'Links visible enemies for 18 seconds. 15% of damage taken is shared between linked targets.'));
         this.abilities.push(new Ability('Shadow Word', 'active', 15, 100, 'Heals allies or damages enemies in an area around the target every second.'));
         this.abilities.push(new Ability('Upheaval', 'active', 30, 100, 'Toggled ability. Slows enemies in a 575 radius and deals 10 damage per second for up to 10 seconds.'));
@@ -1382,8 +1411,8 @@ class Warlock extends Hero {
 class Bristleback extends Hero {
     constructor(x, y, team) {
         super(x, y, team, 'Bristleback');
-        this.maxHp = 800; this.hp = 800;
-        this.damage = 58;
+        this.maxHp = 800; this.hp = 900;
+        this.damage = 64;
         this.baseSpeed = 260; this.speed = 260;
         this.attackRange = 120;
 
@@ -1563,7 +1592,7 @@ class Bristleback extends Hero {
 class Sniper extends Hero {
     constructor(x, y, team) {
         super(x, y, team, 'Sniper'); 
-        this.baseRange = 320; 
+        this.baseRange = 340; 
         this.attackRange = this.baseRange + 140; 
         
         this.abilities.push(new Ability('Shrapnel', 'active', 0, 50, 'Creates an area of explosive shrapnel. Deals 35 damage per second and slows enemies by 25%. Up to 2 charges.'));
@@ -1680,7 +1709,7 @@ class Huskar extends Hero {
         super(x, y, team, 'Huskar');
         this.maxHp = 700; this.hp = 700;
         this.maxMp = 0; this.mp = 0; this.mpRegenBase = 0;
-        this.baseStrength = 40;
+        this.baseStrength = 38;
         this.attackRange = 300;
         this.burningSpearActive = false;
         this.lifeBreakTarget = null;
@@ -1797,16 +1826,16 @@ class Huskar extends Hero {
 class AntiMage extends Hero {
     constructor(x, y, team) {
         super(x, y, team, 'Anti-Mage');
-        this.maxHp = 750;
-        this.hp = 750;
-        this.damage = 55;
+        this.maxHp = 600;
+        this.hp = 600;
+        this.damage = 56;
         this.baseSpeed = 260;
         this.speed = 260;
         this.attackRange = 100;
         this.attackSpeed = 1.2;
         this.maxMp = 300;
         this.mp = 300;
-        this.magicResistance = 0.14;
+        this.magicResistance = 0.15;
 
         this.abilities = [
             new Ability('Mana Break', 'passive', 0, 0, 'Burns 25 mana per attack, dealing bonus physical damage equal to mana burned.'),
@@ -1957,7 +1986,7 @@ class Broodmother extends Hero {
         this.baseSpeed = 295;
         this.speed = 305;
         this.attackRange = 140;
-        this.attackSpeed = 1.2;
+        this.attackSpeed = 1.1;
         this.maxMp = 300;
         this.mp = 300;
         this.hpRegenBase = 2.0;
@@ -2429,10 +2458,10 @@ class Io extends Hero {
         super(x, y, team, 'Io');
         this.maxHp = 550;
         this.hp = 550;
-        this.damage = 48;
-        this.baseSpeed = 320;
-        this.speed = 320;
-        this.attackRange = 500;
+        this.damage = 40;
+        this.baseSpeed = 300;
+        this.speed = 310;
+        this.attackRange = 370;
         this.attackSpeed = 1.3;
         this.maxMp = 300;
         this.mp = 300;
@@ -2465,7 +2494,7 @@ class Io extends Hero {
         this.spiritsOrbitRadius = 200;
         this.spiritsCount = 5;
         this.spiritsHeroDamage = 70;
-        this.spiritsCreepDamage = 18;
+        this.spiritsCreepDamage = 10;
         this.spiritsActive = false;
 
         this.overchargeActive = false;
@@ -2812,8 +2841,7 @@ class Io extends Hero {
             if (this.relocateChannelTimer <= 0) {
                 this.finishRelocate();
             }
-            const distMoved = Math.hypot(this.x - this.relocateOldX, this.y - this.relocateOldY);
-            if (distMoved > 10 || this.isDead) {
+            if (this.isDead) {
                 this.cancelRelocate();
             }
         }
