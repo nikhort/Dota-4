@@ -1,4 +1,4 @@
-// game.js
+// game.js — часть 1
 // --- СИСТЕМА СИНТЕЗА АУДИО (БЕЗ ФАЙЛОВ) ---
 class AudioManager {
     constructor() { this.ctx = null; } 
@@ -890,7 +890,6 @@ class Hero extends Entity {
             this.cancelTeleport('ability');
             return;
         }
-        // Проверка уклонения у цели (если цель имеет evasion)
         if (this.attackTarget && this.attackTarget.evasion > 0) {
             if (Math.random() < this.attackTarget.evasion) {
                 game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS', '#ff6666');
@@ -898,15 +897,13 @@ class Hero extends Entity {
                 return;
             }
         }
-        // Проверка ослепления у цели (missChance)
-        if (this.attackTarget && this.attackTarget.missChance > 0) {
-            if (Math.random() < this.attackTarget.missChance) {
-                game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS (Blind)', '#ff6666');
+        if (this.missChance > 0) {
+            if (Math.random() < this.missChance) {
+                game.uiManager.addFloatingText(this.x, this.y - 30, 'MISS (Blind)', '#ff6666');
                 this.attackCooldown = this.attackSpeed;
                 return;
             }
         }
-        // Далее стандартная атака
         if (this.attackTarget && this.attackTarget.inventory) {
             const radianceItem = this.attackTarget.inventory.items.find(item => item.id === 'radiance');
             if (radianceItem) {
@@ -1028,7 +1025,7 @@ class Morphling extends Hero {
         this.shiftTimer = 0;
     }
 
-    useAbility(idx = 0) {
+    useAbility(idx) {
         if (this.isDead || this.silenceTimer > 0) return;
         if (this.isChannelingTeleport) { this.cancelTeleport('ability'); }
 
@@ -1463,6 +1460,112 @@ class Warlock extends Hero {
     }
 }
 
+// ----- Sniper -----
+class Sniper extends Hero {
+    constructor(x, y, team) {
+        super(x, y, team, 'Sniper'); 
+        this.baseRange = 340; 
+        this.attackRange = this.baseRange + 140; 
+        
+        this.abilities.push(new Ability('Shrapnel', 'active', 0, 50, 'Creates an area of explosive shrapnel. Deals 35 damage per second and slows enemies by 25%. Up to 2 charges.'));
+        this.abilities.push(new Ability('Headshot', 'passive', 0, 0, 'Passive. 30% chance to deal +20 damage, knock back the enemy, and slow their movement and attack for 1.5 sec.'));
+        this.abilities.push(new Ability('Take Aim', 'active', 15, 60, 'Passive: +140 attack range. Active: +150 range and 60% Headshot chance, but slows movement by 65% for 6 sec.'));
+        this.abilities.push(new Ability('Assassinate', 'active', 18, 150, 'Ultimate. Channels for 1.5 sec and deals massive long-range damage.'));
+        
+        this.aimTimer = 0; 
+        this.assTarget = null; 
+        this.assChannel = 0;
+        
+        this.shrapnelCharges = 2;
+        this.maxShrapnelCharges = 2;
+        this.shrapnelChargeRegenTimer = 0;
+        this.shrapnelChargeCooldown = 15;
+    }
+
+    useAbility(idx) {
+        if (this.isDead || this.silenceTimer > 0) return;
+        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); }
+        if (idx === 0) { 
+            let ab = this.abilities[0];
+            if (this.shrapnelCharges > 0 && this.mp >= ab.manaCost) {
+                this.mp -= ab.manaCost;
+                this.shrapnelCharges--;
+                audio.play('ability');
+                let tx = this.targetX;
+                let ty = this.targetY;
+                if (this.attackTarget) { tx = this.attackTarget.x; ty = this.attackTarget.y; }
+                game.shrapnelZones.push(new ShrapnelZone(tx, ty, this.team, this));
+            }
+        }
+        if (idx === 2) { 
+            if (this.abilities[2].trigger(this)) {
+                this.aimTimer = 6.0;
+            }
+        }
+        if (idx === 3) { 
+            let enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+            let t = this.attackTarget || enemies.find(e => Math.hypot(e.x - this.x, e.y - this.y) < 950);
+            if (t && t.blockSpell && t.blockSpell(this)) return;
+            if (t && this.abilities[3].trigger(this)) { this.assTarget = t; this.assChannel = 1.5; }
+        }
+    }
+
+    update(dt) {
+        if (this.shrapnelCharges < this.maxShrapnelCharges) {
+            this.shrapnelChargeRegenTimer += dt;
+            if (this.shrapnelChargeRegenTimer >= this.shrapnelChargeCooldown) {
+                this.shrapnelCharges++;
+                this.shrapnelChargeRegenTimer = 0;
+            }
+        }
+
+        if (this.aimTimer > 0) { 
+            this.aimTimer -= dt; 
+            this.attackRange = this.baseRange + 140 + 150; 
+        } else { 
+            this.attackRange = this.baseRange + 140; 
+        }
+
+        super.update(dt);
+        if (this.isDead) return;
+
+        if (this.assChannel > 0) {
+            this.targetX = this.x; this.targetY = this.y;
+            if (!this.assTarget || this.assTarget.isDead) { this.assChannel = 0; this.assTarget = null; return; }
+            this.assChannel -= dt;
+            if (this.assChannel <= 0) {
+                audio.play('ability');
+                let proj = new Projectile(this.x, this.y, this.assTarget, 380, this.team, this);
+                proj.speed = 1000; proj.isAss = true; game.projectiles.push(proj);
+                this.assTarget = null;
+            }
+        }
+    }
+
+    performAttack() {
+        if (this.assChannel > 0) return;
+        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
+        super.performAttack();
+    }
+
+    draw(ctx, camera) {
+        super.draw(ctx, camera);
+        if (this.isDead) return;
+        let sx = this.x - camera.x; let sy = this.y - camera.y;
+        if (this.aimTimer > 0) {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.7)'; ctx.lineWidth = 3;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath(); ctx.arc(sx, sy, this.radius + 12, 0, Math.PI*2); ctx.stroke();
+            ctx.restore();
+        }
+        if (this.assChannel > 0 && this.assTarget) {
+            ctx.strokeStyle = '#ff0000'; ctx.lineWidth = 1.5; ctx.beginPath();
+            ctx.moveTo(sx, sy); ctx.lineTo(this.assTarget.x - camera.x, this.assTarget.y - camera.y); ctx.stroke();
+        }
+    }
+}
+
 // ----- Bristleback -----
 class Bristleback extends Hero {
     constructor(x, y, team) {
@@ -1636,112 +1739,6 @@ class Bristleback extends Hero {
             ctx.lineWidth = 4;
             ctx.beginPath(); ctx.arc(sx, sy, this.quillRadius / 8, 0, Math.PI * 2); ctx.stroke();
             ctx.restore();
-        }
-    }
-}
-
-// ----- Sniper -----
-class Sniper extends Hero {
-    constructor(x, y, team) {
-        super(x, y, team, 'Sniper'); 
-        this.baseRange = 340; 
-        this.attackRange = this.baseRange + 140; 
-        
-        this.abilities.push(new Ability('Shrapnel', 'active', 0, 50, 'Creates an area of explosive shrapnel. Deals 35 damage per second and slows enemies by 25%. Up to 2 charges.'));
-        this.abilities.push(new Ability('Headshot', 'passive', 0, 0, 'Passive. 30% chance to deal +20 damage, knock back the enemy, and slow their movement and attack for 1.5 sec.'));
-        this.abilities.push(new Ability('Take Aim', 'active', 15, 60, 'Passive: +140 attack range. Active: +150 range and 60% Headshot chance, but slows movement by 65% for 6 sec.'));
-        this.abilities.push(new Ability('Assassinate', 'active', 18, 150, 'Ultimate. Channels for 1.5 sec and deals massive long-range damage.'));
-        
-        this.aimTimer = 0; 
-        this.assTarget = null; 
-        this.assChannel = 0;
-        
-        this.shrapnelCharges = 2;
-        this.maxShrapnelCharges = 2;
-        this.shrapnelChargeRegenTimer = 0;
-        this.shrapnelChargeCooldown = 15;
-    }
-
-    useAbility(idx) {
-        if (this.isDead || this.silenceTimer > 0) return;
-        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); }
-        if (idx === 0) { 
-            let ab = this.abilities[0];
-            if (this.shrapnelCharges > 0 && this.mp >= ab.manaCost) {
-                this.mp -= ab.manaCost;
-                this.shrapnelCharges--;
-                audio.play('ability');
-                let tx = this.targetX;
-                let ty = this.targetY;
-                if (this.attackTarget) { tx = this.attackTarget.x; ty = this.attackTarget.y; }
-                game.shrapnelZones.push(new ShrapnelZone(tx, ty, this.team, this));
-            }
-        }
-        if (idx === 2) { 
-            if (this.abilities[2].trigger(this)) {
-                this.aimTimer = 6.0;
-            }
-        }
-        if (idx === 3) { 
-            let enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
-            let t = this.attackTarget || enemies.find(e => Math.hypot(e.x - this.x, e.y - this.y) < 950);
-            if (t && t.blockSpell && t.blockSpell(this)) return;
-            if (t && this.abilities[3].trigger(this)) { this.assTarget = t; this.assChannel = 1.5; }
-        }
-    }
-
-    update(dt) {
-        if (this.shrapnelCharges < this.maxShrapnelCharges) {
-            this.shrapnelChargeRegenTimer += dt;
-            if (this.shrapnelChargeRegenTimer >= this.shrapnelChargeCooldown) {
-                this.shrapnelCharges++;
-                this.shrapnelChargeRegenTimer = 0;
-            }
-        }
-
-        if (this.aimTimer > 0) { 
-            this.aimTimer -= dt; 
-            this.attackRange = this.baseRange + 140 + 150; 
-        } else { 
-            this.attackRange = this.baseRange + 140; 
-        }
-
-        super.update(dt);
-        if (this.isDead) return;
-
-        if (this.assChannel > 0) {
-            this.targetX = this.x; this.targetY = this.y;
-            if (!this.assTarget || this.assTarget.isDead) { this.assChannel = 0; this.assTarget = null; return; }
-            this.assChannel -= dt;
-            if (this.assChannel <= 0) {
-                audio.play('ability');
-                let proj = new Projectile(this.x, this.y, this.assTarget, 380, this.team, this);
-                proj.speed = 1000; proj.isAss = true; game.projectiles.push(proj);
-                this.assTarget = null;
-            }
-        }
-    }
-
-    performAttack() {
-        if (this.assChannel > 0) return;
-        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
-        super.performAttack();
-    }
-
-    draw(ctx, camera) {
-        super.draw(ctx, camera);
-        if (this.isDead) return;
-        let sx = this.x - camera.x; let sy = this.y - camera.y;
-        if (this.aimTimer > 0) {
-            ctx.save();
-            ctx.strokeStyle = 'rgba(0, 255, 255, 0.7)'; ctx.lineWidth = 3;
-            ctx.setLineDash([4, 4]);
-            ctx.beginPath(); ctx.arc(sx, sy, this.radius + 12, 0, Math.PI*2); ctx.stroke();
-            ctx.restore();
-        }
-        if (this.assChannel > 0 && this.assTarget) {
-            ctx.strokeStyle = '#ff0000'; ctx.lineWidth = 1.5; ctx.beginPath();
-            ctx.moveTo(sx, sy); ctx.lineTo(this.assTarget.x - camera.x, this.assTarget.y - camera.y); ctx.stroke();
         }
     }
 }
@@ -2402,8 +2399,8 @@ class Spiderling extends Entity {
             this.attackCooldown = this.attackSpeed;
             return;
         }
-        if (this.attackTarget.missChance > 0 && Math.random() < this.attackTarget.missChance) {
-            game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS (Blind)', '#ff6666');
+        if (this.missChance > 0 && Math.random() < this.missChance) {
+            game.uiManager.addFloatingText(this.x, this.y - 30, 'MISS (Blind)', '#ff6666');
             this.attackCooldown = this.attackSpeed;
             return;
         }
@@ -3037,9 +3034,10 @@ class Io extends Hero {
         super.draw(ctx, camera);
     }
 }
+// game.js — часть 2 (продолжение)
 
 // =========================================================================
-//  НОВЫЙ ГЕРОЙ: TINKER
+//  НОВЫЙ ГЕРОЙ: TINKER (исправленный)
 // =========================================================================
 
 class Tinker extends Hero {
@@ -3052,48 +3050,76 @@ class Tinker extends Hero {
         this.speed = 305;
         this.attackRange = 600;
         this.attackSpeed = 1.2;
-        this.maxMp = 300;
-        this.mp = 300;
+        this.maxMp = 435;         // увеличено до 435
+        this.mp = 435;
+
         this.hpRegenBase = 2.0;
         this.mpRegenBase = 1.8;
 
-        this.abilities.push(new Ability('Laser', 'active', 19, 40, 'Deals 150 pure damage and blinds the target for 3s (100% miss chance).'));
-        this.abilities.push(new Ability('March of the Machines', 'active', 32, 80, 'Summons machines that deal 22 damage on contact. Lasts 6s.'));
-        this.abilities.push(new Ability('Deploy Turrets', 'active', 24, 70, 'Deploys 3 turrets that fire rockets. Lasts 4.5s.'));
-        this.abilities.push(new Ability('Rearm', 'active', 5, 100, 'Channel for 2s to reset cooldowns of Q, W, E.'));
+        // Порядок способностей: Q, W, E, D, R
+        this.abilities = [
+            new Ability('Laser', 'active', 19, 40, 'Deals 150 pure damage and blinds the target for 3s (100% miss chance).'),
+            new Ability('March of the Machines', 'active', 32, 80, 'Summons machines that march in a straight line, damaging enemies on contact.'),
+            new Ability('Deploy Turrets', 'active', 24, 70, 'Deploys 3 turrets that fire rockets. Lasts 4.5s.'),
+            new Ability('Keen Conveyance', 'active', 80, 75, 'Teleports to an allied tower or fountain after 3s channel. Independent from regular teleport.'),
+            new Ability('Rearm', 'active', 5, 100, 'Channel for 2s to reset cooldowns of Q, W, E, D. Does not reset Rearm itself.')
+        ];
 
-        this.laserTarget = null;
-        this.machines = [];
-        this.turrets = [];
+        // Состояния для Keen Conveyance (отдельно от обычного телепорта)
+        this.isKeenChanneling = false;
+        this.keenTarget = null;
+        this.keenChannelTimer = 0;
+        this.keenStartX = 0;
+        this.keenStartY = 0;
+        this.selectKeenTarget = false;   // режим выбора цели на миникарте
+
+        // Состояния для Rearm
         this.isRearming = false;
         this.rearmTimer = 0;
         this.rearmDuration = 2.0;
         this._rearmStartX = 0;
         this._rearmStartY = 0;
+
+        // Состояния для способностей
         this._laserBeamLife = 0;
         this._laserBeamTarget = null;
-        this.marchMachines = [];
+        this.marchMachines = [];         // массив машин для March
+        this.turrets = [];
+        this._marchDirection = 1;        // 1 - вперёд, -1 - назад
+        this._marchStartX = 0;
+        this._marchStartY = 0;
+        this._marchEndX = 0;
+        this._marchEndY = 0;
+        this._marchDistance = 0;
+        this._marchTraveled = 0;
+        this._marchTotalDistance = 0;
+        this._marchActive = false;
+        this._marchTimer = 0;
+        this._marchDuration = 6.0;
+        this._marchEnemyTeam = team === 'radiant' ? 'dire' : 'radiant';
     }
 
+    // ----- Переопределение useAbility для обработки 5 способностей -----
     useAbility(idx) {
         if (this.isDead || this.silenceTimer > 0) return;
         if (this.isChannelingTeleport) { this.cancelTeleport('ability'); }
+        if (this.isKeenChanneling) {
+            this.cancelKeen('ability');
+            return;
+        }
         if (this.isRearming) {
             this.cancelRearm('ability');
             return;
         }
 
-        if (idx === 0) {
-            this.castLaser();
-        } else if (idx === 1) {
-            this.castMarch();
-        } else if (idx === 2) {
-            this.castTurrets();
-        } else if (idx === 3) {
-            this.castRearm();
-        }
+        if (idx === 0) this.castLaser();
+        else if (idx === 1) this.castMarch();
+        else if (idx === 2) this.castTurrets();
+        else if (idx === 3) this.castKeenConveyance();
+        else if (idx === 4) this.castRearm();
     }
 
+    // ----- Laser (Q) -----
     castLaser() {
         const ab = this.abilities[0];
         if (ab.currentCooldown > 0 || this.mp < ab.manaCost) return;
@@ -3116,38 +3142,130 @@ class Tinker extends Hero {
         game.uiManager.addFloatingText(target.x, target.y - 30, 'BLIND!', '#ffff00');
     }
 
+    // ----- March of the Machines (W) -----
+    // Реализация строго по механике: машины идут по прямой от Tinker в направлении цели,
+    // доходят до конца пути, затем возвращаются обратно и так до окончания длительности.
     castMarch() {
         const ab = this.abilities[1];
         if (ab.currentCooldown > 0 || this.mp < ab.manaCost) return;
+        if (this._marchActive) return; // не накладывать поверх
         this.mp -= ab.manaCost;
         ab.currentCooldown = ab.maxCooldown;
         audio.play('ability');
 
-        const count = 12;
-        const radius = 300;
+        const hasValidTarget = this.attackTarget && !this.attackTarget.isDead && this.attackTarget.team !== this.team;
+        const targetX = hasValidTarget ? this.attackTarget.x : this.targetX;
+        const targetY = hasValidTarget ? this.attackTarget.y : this.targetY;
+        let dx = targetX - this.x;
+        let dy = targetY - this.y;
+        let dist = Math.hypot(dx, dy);
+
+        if (dist < 1) {
+            dx = this.facing * 600;
+            dy = 0;
+            dist = 600;
+        }
+
+        const dirX = dx / dist;
+        const dirY = dy / dist;
+
+        // Путь: от Tinker в сторону цели или текущего направления; длина гарантированно > 0.
+        this._marchStartX = this.x;
+        this._marchStartY = this.y;
+        const marchLength = Math.max(800, Math.min(1500, dist + 500));
+        this._marchEndX = this.x + dirX * marchLength;
+        this._marchEndY = this.y + dirY * marchLength;
+        this._marchTotalDistance = Math.hypot(this._marchEndX - this._marchStartX, this._marchEndY - this._marchStartY);
+        this._marchTraveled = 0;
+        this._marchDirection = 1;
+        this._marchActive = true;
+        this._marchTimer = 0;
+        this._marchDuration = 6.0;
+
+        // Машины — это объекты, которые движутся по этому пути, нанося урон при контакте.
+        // Мы создадим 10 машин, распределённых по длине пути, каждая движется с постоянной скоростью.
+        const count = 10;
+        this.marchMachines = [];
         for (let i = 0; i < count; i++) {
-            const angle = Math.random() * Math.PI * 2;
-            const dist = 50 + Math.random() * radius;
-            const x = this.x + Math.cos(angle) * dist;
-            const y = this.y + Math.sin(angle) * dist;
-            const speed = 80 + Math.random() * 60;
-            const dirAngle = Math.random() * Math.PI * 2;
-            const machine = {
+            const t = i / count; // от 0 до 1
+            const x = this._marchStartX + (this._marchEndX - this._marchStartX) * t;
+            const y = this._marchStartY + (this._marchEndY - this._marchStartY) * t;
+            this.marchMachines.push({
                 x: x,
                 y: y,
-                vx: Math.cos(dirAngle) * speed,
-                vy: Math.sin(dirAngle) * speed,
-                life: 6.0,
-                radius: 12,
+                radius: 10,
                 damage: 22,
                 hitCooldown: {},
                 team: this.team,
                 owner: this,
-            };
-            this.marchMachines.push(machine);
+                // каждая машина движется с разной скоростью, чтобы создать эффект марша
+                speedOffset: 0.8 + Math.random() * 0.4
+            });
+        }
+        game.uiManager.addFloatingText(this.x, this.y - 30, 'March!', '#ffaa00');
+    }
+
+    updateMarch(dt) {
+        if (!this._marchActive) return;
+        this._marchTimer += dt;
+        if (this._marchTimer >= this._marchDuration) {
+            this._marchActive = false;
+            this.marchMachines = [];
+            return;
+        }
+
+        // Обновляем позиции машин: они движутся вдоль пути туда-сюда.
+        const speed = 250; // базовые единицы в секунду
+        const travelDelta = speed * dt * this._marchDirection;
+        this._marchTraveled += travelDelta;
+
+        // Если достигли конца, меняем направление
+        if (this._marchTraveled >= this._marchTotalDistance) {
+            this._marchTraveled = this._marchTotalDistance;
+            this._marchDirection = -1;
+        } else if (this._marchTraveled <= 0) {
+            this._marchTraveled = 0;
+            this._marchDirection = 1;
+        }
+
+        // Расставляем машины по пути в соответствии с пройденным расстоянием
+        const count = this.marchMachines.length;
+        for (let i = 0; i < count; i++) {
+            const t = (i / count) * this._marchTotalDistance;
+            let pos = (this._marchTraveled + t) % (this._marchTotalDistance * 2);
+            if (pos > this._marchTotalDistance) pos = this._marchTotalDistance * 2 - pos;
+            const frac = pos / this._marchTotalDistance;
+            const x = this._marchStartX + (this._marchEndX - this._marchStartX) * frac;
+            const y = this._marchStartY + (this._marchEndY - this._marchStartY) * frac;
+            this.marchMachines[i].x = x;
+            this.marchMachines[i].y = y;
+        }
+
+        // Наносим урон врагам, которые касаются машин
+        const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+        for (let m of this.marchMachines) {
+            for (let e of enemies) {
+                if (e.isDead) continue;
+                const dist = Math.hypot(e.x - m.x, e.y - m.y);
+                if (dist < m.radius + e.radius) {
+                    const id = e.id || e._uid || (e.x + '' + e.y);
+                    if (!m.hitCooldown) m.hitCooldown = {};
+                    if (!m.hitCooldown[id] || m.hitCooldown[id] <= 0) {
+                        e.takeDamage(m.damage, m.owner);
+                        m.hitCooldown[id] = 0.5;
+                        game.uiManager.addFloatingText(e.x, e.y - 20, '-22', '#ff8800');
+                    }
+                }
+            }
+            // обновляем кулдауны попаданий
+            for (let key in m.hitCooldown) {
+                m.hitCooldown[key] -= dt;
+                if (m.hitCooldown[key] < 0) m.hitCooldown[key] = 0;
+            }
         }
     }
 
+    // ----- Deploy Turrets (E) -----
     castTurrets() {
         const ab = this.abilities[2];
         if (ab.currentCooldown > 0 || this.mp < ab.manaCost) return;
@@ -3187,101 +3305,7 @@ class Tinker extends Hero {
         }
     }
 
-    castRearm() {
-        const ab = this.abilities[3];
-        if (ab.currentCooldown > 0 || this.mp < ab.manaCost) return;
-        if (this.isRearming) return;
-        this.mp -= ab.manaCost;
-        ab.currentCooldown = ab.maxCooldown;
-        audio.play('ability');
-
-        this.isRearming = true;
-        this.rearmTimer = this.rearmDuration;
-        this._rearmStartX = this.x;
-        this._rearmStartY = this.y;
-        this.attackTarget = null;
-        this.targetX = this.x;
-        this.targetY = this.y;
-        this.isMovingToWaypoint = false;
-        game.uiManager.addFloatingText(this.x, this.y - 40, 'Rearming...', '#00ccff');
-    }
-
-    cancelRearm(reason = '') {
-        if (!this.isRearming) return;
-        this.isRearming = false;
-        this.rearmTimer = 0;
-        if (reason === 'move') {
-            game.uiManager.addFloatingText(this.x, this.y - 40, 'Rearm cancelled (moved)', '#ff6666');
-        } else if (reason === 'ability') {
-            game.uiManager.addFloatingText(this.x, this.y - 40, 'Rearm cancelled (ability)', '#ff6666');
-        } else if (reason === 'death') {
-            // не показываем
-        } else {
-            game.uiManager.addFloatingText(this.x, this.y - 40, 'Rearm cancelled', '#ff6666');
-        }
-    }
-
-    finishRearm() {
-        if (!this.isRearming) return;
-        this.isRearming = false;
-        for (let i = 0; i < 3; i++) {
-            if (this.abilities[i]) {
-                this.abilities[i].currentCooldown = 0;
-            }
-        }
-        game.uiManager.addFloatingText(this.x, this.y - 30, 'Rearm complete!', '#00ff00');
-    }
-
-    update(dt) {
-        if (this.isDead) return;
-        this.updateTeleport(dt);
-
-        if (this.missChanceTimer > 0) {
-            this.missChanceTimer -= dt;
-            if (this.missChanceTimer <= 0) {
-                this.missChance = 0;
-                this.missChanceTimer = 0;
-            }
-        }
-
-        if (this._laserBeamLife > 0) {
-            this._laserBeamLife -= dt;
-            if (this._laserBeamLife <= 0) {
-                this._laserBeamTarget = null;
-            }
-        }
-
-        for (let i = this.marchMachines.length - 1; i >= 0; i--) {
-            const m = this.marchMachines[i];
-            m.life -= dt;
-            if (m.life <= 0) {
-                this.marchMachines.splice(i, 1);
-                continue;
-            }
-            m.x += m.vx * dt;
-            m.y += m.vy * dt;
-            if (m.x < 0 || m.x > game.map.width) m.vx *= -1;
-            if (m.y < 0 || m.y > game.map.height) m.vy *= -1;
-            const enemies = m.team === 'radiant' ? game.direEntities() : game.radiantEntities();
-            for (let e of enemies) {
-                if (e.isDead) continue;
-                const dist = Math.hypot(e.x - m.x, e.y - m.y);
-                if (dist < m.radius + e.radius) {
-                    const id = e.id || e._uid || (e.x + '' + e.y);
-                    if (!m.hitCooldown) m.hitCooldown = {};
-                    if (!m.hitCooldown[id] || m.hitCooldown[id] <= 0) {
-                        e.takeDamage(m.damage, m.owner);
-                        m.hitCooldown[id] = 0.5;
-                        game.uiManager.addFloatingText(e.x, e.y - 20, '-22', '#ff8800');
-                    }
-                }
-            }
-            for (let key in m.hitCooldown) {
-                m.hitCooldown[key] -= dt;
-                if (m.hitCooldown[key] < 0) m.hitCooldown[key] = 0;
-            }
-        }
-
+    updateTurrets(dt) {
         for (let i = this.turrets.length - 1; i >= 0; i--) {
             const t = this.turrets[i];
             t.life -= dt;
@@ -3335,7 +3359,225 @@ class Tinker extends Hero {
                 }
             }
         }
+    }
 
+    // ----- Keen Conveyance (D) - отдельный телепорт -----
+    castKeenConveyance() {
+        const ab = this.abilities[3];
+        if (ab.currentCooldown > 0 || this.mp < ab.manaCost) return;
+        if (this.isKeenChanneling) return;
+        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); }
+
+        // Включаем режим выбора цели на миникарте
+        this.selectKeenTarget = true;
+        game._keenSelectionMode = true;
+        game.uiManager.addFloatingText(this.x, this.y - 50, '📡 Select tower or fountain on minimap', '#7dd3fc');
+    }
+
+    // Вызывается при клике на миникарту для Keen Conveyance
+    selectKeenTargetOnMinimap(mx, my) {
+        if (!this.selectKeenTarget) return false;
+        const map = game.map;
+        const gx = (mx / 200) * map.width;  // 200 - размер миникарты в пикселях
+        const gy = (my / 200) * map.height;
+        const clickRadiusPx = 15;
+        // Ищем башню или фонтан
+        let target = null;
+        let minDist = Infinity;
+        for (let t of game.towers) {
+            if (t.team === this.team && !t.isDead) {
+                const tx = (t.x / map.width) * 200;
+                const ty = (t.y / map.height) * 200;
+                const d = Math.hypot(mx - tx, my - ty);
+                if (d < minDist && d <= clickRadiusPx) {
+                    minDist = d;
+                    target = t;
+                }
+            }
+        }
+        for (let f of game.fountains) {
+            if (f.team === this.team) {
+                const tx = (f.x / map.width) * 200;
+                const ty = (f.y / map.height) * 200;
+                const d = Math.hypot(mx - tx, my - ty);
+                if (d < minDist && d <= clickRadiusPx) {
+                    minDist = d;
+                    target = f;
+                }
+            }
+        }
+        if (target) {
+            this.startKeenTeleport(target);
+            this.selectKeenTarget = false;
+            game._keenSelectionMode = false;
+            return true;
+        }
+        return false;
+    }
+
+    startKeenTeleport(target) {
+        if (this.isDead) return false;
+        if (this.isKeenChanneling) return false;
+        if (this.isChannelingTeleport) this.cancelTeleport('ability');
+        const ab = this.abilities[3];
+        if (ab.currentCooldown > 0 || this.mp < ab.manaCost) return false;
+        if (!target || target.isDead || (target.team !== this.team)) return false;
+
+        this.mp -= ab.manaCost;
+        ab.currentCooldown = ab.maxCooldown;
+        audio.play('ability');
+
+        this.isKeenChanneling = true;
+        this.keenTarget = target;
+        this.keenChannelTimer = 3.0;
+        this.keenStartX = this.x;
+        this.keenStartY = this.y;
+        this.attackTarget = null;
+        this.targetX = this.x;
+        this.targetY = this.y;
+        this.isMovingToWaypoint = false;
+        game.uiManager.addFloatingText(this.x, this.y - 40, '📡 Keen Teleporting...', '#7dd3fc');
+        return true;
+    }
+
+    cancelKeen(reason = '') {
+        if (!this.isKeenChanneling) return;
+        this.isKeenChanneling = false;
+        this.keenTarget = null;
+        this.keenChannelTimer = 0;
+        if (game && game.uiManager) {
+            if (reason === 'move') {
+                game.uiManager.addFloatingText(this.x, this.y - 40, '❌ Keen cancelled (moved)', '#ff6666');
+            } else if (reason === 'ability') {
+                game.uiManager.addFloatingText(this.x, this.y - 40, '❌ Keen cancelled (ability)', '#ff6666');
+            } else if (reason === 'death') {
+                // не показываем
+            } else {
+                game.uiManager.addFloatingText(this.x, this.y - 40, '❌ Keen cancelled', '#ff6666');
+            }
+        }
+    }
+
+    updateKeen(dt) {
+        if (!this.isKeenChanneling) return;
+        if (this.isDead) {
+            this.cancelKeen('death');
+            return;
+        }
+        const distMoved = Math.hypot(this.x - this.keenStartX, this.y - this.keenStartY);
+        if (distMoved > 5) {
+            this.cancelKeen('move');
+            return;
+        }
+        if (!this.keenTarget || this.keenTarget.isDead || this.keenTarget.team !== this.team) {
+            this.cancelKeen('target lost');
+            return;
+        }
+        this.keenChannelTimer -= dt;
+        if (this.keenChannelTimer <= 0) {
+            this.finishKeen();
+        }
+    }
+
+    finishKeen() {
+        if (!this.isKeenChanneling) return;
+        const target = this.keenTarget;
+        if (!target || target.isDead) {
+            this.cancelKeen('target lost');
+            return;
+        }
+        const angle = Math.random() * Math.PI * 2;
+        const distance = 50 + this.radius + (target.radius || 30);
+        let tx = target.x + Math.cos(angle) * distance;
+        let ty = target.y + Math.sin(angle) * distance;
+        tx = Math.max(0, Math.min(game.map.width, tx));
+        ty = Math.max(0, Math.min(game.map.height, ty));
+        this.x = tx;
+        this.y = ty;
+        this.targetX = this.x;
+        this.targetY = this.y;
+        this.isKeenChanneling = false;
+        this.keenTarget = null;
+        this.keenChannelTimer = 0;
+        game.uiManager.addFloatingText(this.x, this.y - 30, '✅ Keen Teleported!', '#7dd3fc');
+        game.effects.push({ type: 'teleport_arrive', x: this.x, y: this.y, life: 0.5, radius: 40, team: this.team });
+    }
+
+    // ----- Rearm (R) -----
+    castRearm() {
+        const ab = this.abilities[4];
+        if (ab.currentCooldown > 0 || this.mp < ab.manaCost) return;
+        if (this.isRearming) return;
+        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); }
+        if (this.isKeenChanneling) { this.cancelKeen('ability'); }
+
+        this.mp -= ab.manaCost;
+        ab.currentCooldown = ab.maxCooldown;
+        audio.play('ability');
+
+        this.isRearming = true;
+        this.rearmTimer = this.rearmDuration;
+        this._rearmStartX = this.x;
+        this._rearmStartY = this.y;
+        this.attackTarget = null;
+        this.targetX = this.x;
+        this.targetY = this.y;
+        this.isMovingToWaypoint = false;
+        game.uiManager.addFloatingText(this.x, this.y - 40, 'Rearming...', '#00ccff');
+    }
+
+    cancelRearm(reason = '') {
+        if (!this.isRearming) return;
+        this.isRearming = false;
+        this.rearmTimer = 0;
+        if (reason === 'move') {
+            game.uiManager.addFloatingText(this.x, this.y - 40, 'Rearm cancelled (moved)', '#ff6666');
+        } else if (reason === 'ability') {
+            game.uiManager.addFloatingText(this.x, this.y - 40, 'Rearm cancelled (ability)', '#ff6666');
+        } else if (reason === 'death') {
+            // не показываем
+        } else {
+            game.uiManager.addFloatingText(this.x, this.y - 40, 'Rearm cancelled', '#ff6666');
+        }
+    }
+
+    finishRearm() {
+        if (!this.isRearming) return;
+        this.isRearming = false;
+        // Сброс первых четырёх способностей (Q, W, E, D)
+        for (let i = 0; i < 4; i++) {
+            if (this.abilities[i]) {
+                this.abilities[i].currentCooldown = 0;
+            }
+        }
+        game.uiManager.addFloatingText(this.x, this.y - 30, 'Rearm complete!', '#00ff00');
+    }
+
+    // ----- Переопределённые методы -----
+    update(dt) {
+        if (this.isDead) return;
+        this.updateTeleport(dt);
+        this.updateKeen(dt);
+
+        if (this.missChanceTimer > 0) {
+            this.missChanceTimer -= dt;
+            if (this.missChanceTimer <= 0) {
+                this.missChance = 0;
+                this.missChanceTimer = 0;
+            }
+        }
+
+        if (this._laserBeamLife > 0) {
+            this._laserBeamLife -= dt;
+            if (this._laserBeamLife <= 0) this._laserBeamTarget = null;
+        }
+
+        // Обновляем March
+        this.updateMarch(dt);
+        // Обновляем турели
+        this.updateTurrets(dt);
+
+        // Rearm
         if (this.isRearming) {
             const distMoved = Math.hypot(this.x - this._rearmStartX, this.y - this._rearmStartY);
             if (distMoved > 5) {
@@ -3358,9 +3600,13 @@ class Tinker extends Hero {
             this.cancelTeleport('ability');
             return;
         }
-        if (this.attackTarget && this.attackTarget.missChance > 0) {
-            if (Math.random() < this.attackTarget.missChance) {
-                game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS (Blind)', '#ff6666');
+        if (this.isKeenChanneling) {
+            this.cancelKeen('ability');
+            return;
+        }
+        if (this.missChance > 0) {
+            if (Math.random() < this.missChance) {
+                game.uiManager.addFloatingText(this.x, this.y - 30, 'MISS (Blind)', '#ff6666');
                 this.attackCooldown = this.attackSpeed;
                 return;
             }
@@ -3368,11 +3614,13 @@ class Tinker extends Hero {
         super.performAttack();
     }
 
+    // ----- Отрисовка -----
     draw(ctx, camera) {
         super.draw(ctx, camera);
         const sx = this.x - camera.x;
         const sy = this.y - camera.y;
 
+        // Лазерный луч
         if (this._laserBeamLife > 0 && this._laserBeamTarget && !this._laserBeamTarget.isDead) {
             ctx.save();
             ctx.strokeStyle = 'rgba(255, 50, 50, 0.8)';
@@ -3386,6 +3634,7 @@ class Tinker extends Hero {
             ctx.restore();
         }
 
+        // Отрисовка машин March
         for (let m of this.marchMachines) {
             const msx = m.x - camera.x;
             const msy = m.y - camera.y;
@@ -3403,6 +3652,7 @@ class Tinker extends Hero {
             ctx.restore();
         }
 
+        // Отрисовка турелей
         for (let t of this.turrets) {
             const tsx = t.x - camera.x;
             const tsy = t.y - camera.y;
@@ -3423,6 +3673,19 @@ class Tinker extends Hero {
             ctx.restore();
         }
 
+        // Индикация Keen Conveyance
+        if (this.isKeenChanneling) {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255, 215, 0, 0.6)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.arc(sx, sy, this.radius + 16, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // Индикация Rearm
         if (this.isRearming) {
             ctx.save();
             ctx.fillStyle = 'rgba(0, 200, 255, 0.3)';
@@ -3439,8 +3702,9 @@ class Tinker extends Hero {
 }
 
 // =========================================================================
-//  ВСПОМОГАТЕЛЬНЫЙ КЛАСС ShrapnelZone (начало части 2)
+//  ВСПОМОГАТЕЛЬНЫЕ КЛАССЫ (ShrapnelZone, Creep, WarlockGolem, Catapult, Tower, Ancient, Fountain, Projectile, TurretRocket, BountyRune, Barracks, NeutralCreep, NeutralCamp)
 // =========================================================================
+
 class ShrapnelZone {
     constructor(x, y, team, caster) {
         this.x = x; this.y = y; this.team = team; this.caster = caster;
@@ -3481,9 +3745,6 @@ class ShrapnelZone {
         ctx.restore();
     }
 }
-// =========================================================================
-//  ВСПОМОГАТЕЛЬНЫЕ КЛАССЫ (продолжение)
-// =========================================================================
 
 class Creep extends Entity {
     constructor(x, y, team, type, lane) {
@@ -3577,13 +3838,12 @@ class Creep extends Entity {
                 let finalDamage = this.damage;
                 if (this.vladmirAura) finalDamage *= 1.18;
                 if (this.type === 'melee') {
-                    // Проверка уклонения и ослепления
                     if (this.attackTarget.evasion > 0 && Math.random() < this.attackTarget.evasion) {
                         game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS', '#ff6666');
                         return;
                     }
-                    if (this.attackTarget.missChance > 0 && Math.random() < this.attackTarget.missChance) {
-                        game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS (Blind)', '#ff6666');
+                    if (this.missChance > 0 && Math.random() < this.missChance) {
+                        game.uiManager.addFloatingText(this.x, this.y - 30, 'MISS (Blind)', '#ff6666');
                         return;
                     }
                     this.attackTarget.takeDamage(finalDamage, this);
@@ -3991,7 +4251,6 @@ class Projectile {
         let dy = this.target.y - this.y;
         let dist = Math.hypot(dx, dy);
         if (dist < 12) {
-            // Проверка уклонения и ослепления для обычных атак
             let isMagicDamage = false;
             if (this.isAss || this.isBurningSpear || this.isManaBreak) {
                 // эти типы могут быть магией или особыми, не проверяем уклонение
@@ -4269,10 +4528,6 @@ class Barracks {
     }
 }
 
-// =========================================================================
-//  НОВЫЙ КЛАСС: ЛЕСНЫЕ КРИПЫ (Neutral Creep)
-// =========================================================================
-
 class NeutralCreep extends Entity {
     constructor(x, y, team, camp, type = 'weak') {
         const isWeak = type === 'weak';
@@ -4393,8 +4648,8 @@ class NeutralCreep extends Entity {
             this.attackCooldown = this.attackSpeed;
             return;
         }
-        if (this.attackTarget.missChance > 0 && Math.random() < this.attackTarget.missChance) {
-            game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS (Blind)', '#ff6666');
+        if (this.missChance > 0 && Math.random() < this.missChance) {
+            game.uiManager.addFloatingText(this.x, this.y - 30, 'MISS (Blind)', '#ff6666');
             this.attackCooldown = this.attackSpeed;
             return;
         }
@@ -4439,10 +4694,6 @@ class NeutralCreep extends Entity {
         this.drawHealthBar(ctx, camera);
     }
 }
-
-// =========================================================================
-//  НОВЫЙ КЛАСС: ЛАГЕРЬ НЕЙТРАЛОВ (ИСПРАВЛЕННЫЙ)
-// =========================================================================
 
 class NeutralCamp {
     constructor(x, y, type, teamSide) {
@@ -4588,7 +4839,7 @@ class NeutralCamp {
 }
 
 // =========================================================================
-//  ИИ БОТОВ (BotAI) — с поддержкой Tinker, нейтралов, Butterfly
+//  ИИ БОТОВ (BotAI) — с поддержкой Tinker
 // =========================================================================
 
 class BotAI {
@@ -4652,7 +4903,7 @@ class BotAI {
         const hero = this.hero;
         if (hero.isDead) return;
 
-        if (hero.isChannelingTeleport) {
+        if (hero.isChannelingTeleport || hero.isKeenChanneling || hero.isRearming) {
             return;
         }
 
@@ -5026,15 +5277,19 @@ class BotAI {
                     hero.useAbility(2);
                     return;
                 }
-                if (hero.abilities[3].currentCooldown <= 0 && hero.mp >= hero.abilities[3].manaCost && !hero.isRearming) {
-                    hero.useAbility(3);
-                    return;
+                // Используем Rearm если есть что сбрасывать
+                if (hero.abilities[4].currentCooldown <= 0 && hero.mp >= hero.abilities[4].manaCost && !hero.isRearming) {
+                    const q = hero.abilities[0], w = hero.abilities[1], e = hero.abilities[2], d = hero.abilities[3];
+                    if (q.currentCooldown > 0 || w.currentCooldown > 0 || e.currentCooldown > 0 || d.currentCooldown > 0) {
+                        hero.useAbility(4);
+                        return;
+                    }
                 }
             } else {
-                if (hero.abilities[3].currentCooldown <= 0 && hero.mp >= hero.abilities[3].manaCost && !hero.isRearming) {
-                    const q = hero.abilities[0], w = hero.abilities[1], e = hero.abilities[2];
-                    if (q.currentCooldown > 0 || w.currentCooldown > 0 || e.currentCooldown > 0) {
-                        hero.useAbility(3);
+                if (hero.abilities[4].currentCooldown <= 0 && hero.mp >= hero.abilities[4].manaCost && !hero.isRearming) {
+                    const q = hero.abilities[0], w = hero.abilities[1], e = hero.abilities[2], d = hero.abilities[3];
+                    if (q.currentCooldown > 0 || w.currentCooldown > 0 || e.currentCooldown > 0 || d.currentCooldown > 0) {
+                        hero.useAbility(4);
                         return;
                     }
                 }
@@ -5042,7 +5297,7 @@ class BotAI {
             return;
         }
 
-        // Остальная логика для других героев (Anti-Mage и все остальные)
+        // Остальная логика для других героев
         if (hero instanceof AntiMage) {
             if (hero.abilities[2].currentCooldown <= 0 && hero.mp >= 50) {
                 const enemies = hero.team === 'radiant' ? this.game.direEntities() : this.game.radiantEntities();
@@ -5170,7 +5425,9 @@ class UIManager {
             if (direThroneHp) direThroneHp.innerText = `${Math.ceil((dt.hp/dt.maxHp)*100)}%`;
         }
         
-        for (let i = 0; i < 4; i++) {
+        // Отображение способностей (до 5 слотов)
+        const totalSlots = p instanceof Tinker ? 5 : 4;
+        for (let i = 0; i < totalSlots; i++) {
             let slot = document.getElementById(`ability-${i}`);
             let cd = document.getElementById(`cooldown-${i}`);
             let tt = document.getElementById(`tooltip-${i}`);
@@ -5181,6 +5438,9 @@ class UIManager {
                     let displayName = ab.name;
                     if (p instanceof Sniper && i === 0) {
                         displayName = `${ab.name} (${p.shrapnelCharges})`;
+                    }
+                    if (p instanceof Tinker && i === 3) {
+                        displayName = ab.name; // Keen Conveyance
                     }
                     slot.querySelector('.ability-name').innerText = displayName;
                     tt.innerHTML = `<strong>${ab.name}</strong><br>${ab.description}<br>Cost: ${ab.manaCost} | CD: ${ab.maxCooldown}s`;
@@ -5201,6 +5461,15 @@ class UIManager {
                 if (slot) slot.style.display = "none";
             }
         }
+        // Скрываем лишний слот, если не Tinker
+        if (!(p instanceof Tinker)) {
+            const extraSlot = document.getElementById('ability-4');
+            if (extraSlot) extraSlot.style.display = 'none';
+        } else {
+            const extraSlot = document.getElementById('ability-4');
+            if (extraSlot) extraSlot.style.display = 'flex';
+        }
+
         for (let i = 0; i < 6; i++) {
             let slot = document.querySelector(`.inventory-slot[data-slot="${i}"]`);
             if (slot) {
@@ -5274,15 +5543,19 @@ class UIManager {
 
         const player = game.playerHero;
         const isTeleportMode = player && player.isChannelingTeleport === false && player.teleportCharges > 0 && game._teleportSelectionMode;
+        const isKeenMode = player && player instanceof Tinker && player.selectKeenTarget;
         let highlightTowers = [];
         if (isTeleportMode) {
             highlightTowers = game.towers.filter(t => t.team === player.team && !t.isDead);
+        } else if (isKeenMode) {
+            highlightTowers = game.towers.filter(t => t.team === player.team && !t.isDead);
+            // также подсвечиваем фонтан
         }
 
         for (let t of game.towers) {
             if (t.isDead) continue;
             const pos = toM(t.x, t.y);
-            const isHighlight = highlightTowers.includes(t);
+            const isHighlight = highlightTowers.includes(t) || (isKeenMode && t.team === player.team);
             mCtx.beginPath();
             mCtx.arc(pos.x, pos.y, isHighlight ? 5 : 3, 0, Math.PI * 2);
             if (isHighlight) {
@@ -5295,6 +5568,19 @@ class UIManager {
             }
             mCtx.fill();
             mCtx.shadowBlur = 0;
+        }
+
+        for (let f of game.fountains) {
+            if (f.team === player?.team && isKeenMode) {
+                const pos = toM(f.x, f.y);
+                mCtx.beginPath();
+                mCtx.arc(pos.x, pos.y, 5, 0, Math.PI * 2);
+                mCtx.fillStyle = '#00ffff';
+                mCtx.shadowBlur = 10;
+                mCtx.shadowColor = '#00ffff';
+                mCtx.fill();
+                mCtx.shadowBlur = 0;
+            }
         }
 
         for (let a of game.ancients) {
@@ -5360,11 +5646,17 @@ class UIManager {
             mCtx.textAlign = 'center';
             mCtx.fillText('Click tower', w/2, h-4);
         }
+        if (isKeenMode) {
+            mCtx.fillStyle = 'rgba(255, 215, 0, 0.7)';
+            mCtx.font = '8px Arial';
+            mCtx.textAlign = 'center';
+            mCtx.fillText('Click tower/fountain', w/2, h-4);
+        }
     }
 }
 
 // =========================================================================
-//  ОСНОВНОЙ КЛАСС ИГРЫ (Game) — С НОВОЙ ЛОГИКОЙ ВЫБОРА РОЛЕЙ, БОТОВ, TINKER
+//  ОСНОВНОЙ КЛАСС ИГРЫ (Game)
 // =========================================================================
 
 class Game {
@@ -5402,6 +5694,7 @@ class Game {
         this.goldTimer = 0;
         this._teleportSelectionMode = false;
         this._relocateSelectionMode = false;
+        this._keenSelectionMode = false;
         this.neutralCamps = [];
         this.initNeutralCamps();
         this.initWorld(); 
@@ -5875,6 +6168,54 @@ class Game {
                     return;
                 }
 
+                // Keen Conveyance для Tinker
+                if (player instanceof Tinker && player.selectKeenTarget) {
+                    const rect = minimapCanvas.getBoundingClientRect();
+                    const scaleX = minimapCanvas.width / rect.width;
+                    const scaleY = minimapCanvas.height / rect.height;
+                    const mx = (e.clientX - rect.left) * scaleX;
+                    const my = (e.clientY - rect.top) * scaleY;
+                    if (mx < 0 || mx > minimapCanvas.width || my < 0 || my > minimapCanvas.height) return;
+                    const map = this.map;
+                    const gx = (mx / minimapCanvas.width) * map.width;
+                    const gy = (my / minimapCanvas.height) * map.height;
+                    // Ищем башню или фонтан
+                    const clickRadiusPx = 15;
+                    let target = null;
+                    let minDist = Infinity;
+                    for (let t of this.towers) {
+                        if (t.team === player.team && !t.isDead) {
+                            const tx = (t.x / map.width) * minimapCanvas.width;
+                            const ty = (t.y / map.height) * minimapCanvas.height;
+                            const d = Math.hypot(mx - tx, my - ty);
+                            if (d < minDist && d <= clickRadiusPx) {
+                                minDist = d;
+                                target = t;
+                            }
+                        }
+                    }
+                    for (let f of this.fountains) {
+                        if (f.team === player.team) {
+                            const tx = (f.x / map.width) * minimapCanvas.width;
+                            const ty = (f.y / map.height) * minimapCanvas.height;
+                            const d = Math.hypot(mx - tx, my - ty);
+                            if (d < minDist && d <= clickRadiusPx) {
+                                minDist = d;
+                                target = f;
+                            }
+                        }
+                    }
+                    if (target) {
+                        player.startKeenTeleport(target);
+                        player.selectKeenTarget = false;
+                        this._keenSelectionMode = false;
+                        e.stopPropagation();
+                        e.preventDefault();
+                    }
+                    return;
+                }
+
+                // Обычный телепорт (T)
                 if (!this._teleportSelectionMode || !this.playerHero || this.playerHero.isDead || this.playerHero.teleportCharges <= 0 || this.playerHero.isChannelingTeleport) {
                     return;
                 }
@@ -5916,8 +6257,19 @@ class Game {
             if (!this.playerHero || this.playerHero.isDead) return;
             if (k === 'q' || k === 'й') this.playerHero.useAbility(0);
             if (k === 'w' || k === 'ц') this.playerHero.useAbility(1);
-            if (k === 'e' || k === 'у') this.playerHero.useAbility(2); 
-            if (k === 'r' || k === 'к') this.playerHero.useAbility(3); 
+            if (k === 'e' || k === 'у') this.playerHero.useAbility(2);
+            if (k === 'r' || k === 'к') {
+                if (this.playerHero instanceof Tinker) {
+                    this.playerHero.useAbility(4); // Rearm на R
+                } else {
+                    this.playerHero.useAbility(3);
+                }
+            }
+            if (k === 'd' || k === 'в') {
+                if (this.playerHero instanceof Tinker) {
+                    this.playerHero.useAbility(3); // Keen Conveyance на D
+                }
+            }
             if (k === 'p' || k === 'з') this.toggleShop();
             if (k === 'g' || k === 'п') this.activateGlyph();
             if (k === 't' || k === 'е') {
@@ -5952,6 +6304,17 @@ class Game {
                     this.playerHero.useAbility(1);
                 }
             });
+        }
+
+        for (let i = 0; i < 5; i++) {
+            const slot = document.getElementById(`ability-${i}`);
+            if (slot) {
+                slot.addEventListener('click', () => {
+                    if (this.playerHero && !this.playerHero.isDead) {
+                        this.playerHero.useAbility(i);
+                    }
+                });
+            }
         }
     }
 
@@ -6230,4 +6593,4 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     });
-}); 
+});
