@@ -341,14 +341,11 @@ class Inventory {
         if (item.stats.manaRegenBonus) this.owner.inventoryManaRegen = (this.owner.inventoryManaRegen || 0) + item.stats.manaRegenBonus * factor;
         if (item.stats.hpRegen) this.owner.inventoryHpRegen = (this.owner.inventoryHpRegen || 0) + item.stats.hpRegen * factor;
         if (item.stats.armorBonus) this.owner.armor = (this.owner.armor || 0) + item.stats.armorBonus * factor;
-        // Новая поддержка уклонения
         if (item.stats.evasion) {
             if (!this.owner.evasion) this.owner.evasion = 0;
             this.owner.evasion += item.stats.evasion * factor;
-            // Ограничим уклонение 90% (максимум)
             if (this.owner.evasion > 0.9) this.owner.evasion = 0.9;
         }
-        // Поддержка agility (для будущего использования)
         if (item.stats.agility) {
             if (!this.owner.agility) this.owner.agility = 0;
             this.owner.agility += item.stats.agility * factor;
@@ -388,8 +385,9 @@ class Entity {
         this._stuckTime = 0;
         this.counterspellActive = false;
         this.counterspellTimer = 0;
-        // Уклонение (по умолчанию 0)
         this.evasion = 0;
+        this.missChance = 0;
+        this.missChanceTimer = 0;
     }
 
     isAttackable() {
@@ -448,6 +446,13 @@ class Entity {
             if (this.counterspellTimer <= 0) {
                 this.counterspellActive = false;
                 this.counterspellTimer = 0;
+            }
+        }
+        if (this.missChanceTimer > 0) {
+            this.missChanceTimer -= dt;
+            if (this.missChanceTimer <= 0) {
+                this.missChance = 0;
+                this.missChanceTimer = 0;
             }
         }
 
@@ -638,8 +643,9 @@ class Hero extends Entity {
         
         this.respawnTimer = 0;
         this.isRespawning = false;
-        // Уклонение (уже есть в Entity)
         this.evasion = 0;
+        this.missChance = 0;
+        this.missChanceTimer = 0;
     }
 
     getHpRegen() {
@@ -884,11 +890,19 @@ class Hero extends Entity {
             this.cancelTeleport('ability');
             return;
         }
-        // Проверка уклонения у цели
+        // Проверка уклонения у цели (если цель имеет evasion)
         if (this.attackTarget && this.attackTarget.evasion > 0) {
             if (Math.random() < this.attackTarget.evasion) {
                 game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS', '#ff6666');
-                this.attackCooldown = this.attackSpeed; // всё равно перезаряжаем
+                this.attackCooldown = this.attackSpeed;
+                return;
+            }
+        }
+        // Проверка ослепления у цели (missChance)
+        if (this.attackTarget && this.attackTarget.missChance > 0) {
+            if (Math.random() < this.attackTarget.missChance) {
+                game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS (Blind)', '#ff6666');
+                this.attackCooldown = this.attackSpeed;
                 return;
             }
         }
@@ -988,6 +1002,7 @@ class Hero extends Entity {
         this.drawTeleportBar(ctx, camera);
     }
 }
+
 // =========================================================================
 //  ГЕРОИ (наследники) – полные определения
 // =========================================================================
@@ -1593,7 +1608,6 @@ class Bristleback extends Hero {
 
     performAttack() {
         if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
-        // Проверка уклонения у цели (уже в родительском методе)
         super.performAttack();
     }
 
@@ -1711,7 +1725,6 @@ class Sniper extends Hero {
     performAttack() {
         if (this.assChannel > 0) return;
         if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
-        // Проверка уклонения у цели (в родителе)
         super.performAttack();
     }
 
@@ -1832,7 +1845,6 @@ class Huskar extends Hero {
 
     performAttack() {
         if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
-        // Проверка уклонения (в родителе)
         super.performAttack();
     }
 }
@@ -1862,7 +1874,6 @@ class AntiMage extends Hero {
 
     performAttack() {
         if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
-        // Проверка уклонения (в родителе)
         super.performAttack();
     }
 
@@ -2126,7 +2137,6 @@ class Broodmother extends Hero {
 
     performAttack() {
         if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
-        // Проверка уклонения (в родителе)
         super.performAttack();
     }
 
@@ -2387,9 +2397,13 @@ class Spiderling extends Entity {
 
     performAttack() {
         if (!this.attackTarget || this.attackTarget.isDead) return;
-        // Проверка уклонения у цели
         if (this.attackTarget.evasion > 0 && Math.random() < this.attackTarget.evasion) {
             game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS', '#ff6666');
+            this.attackCooldown = this.attackSpeed;
+            return;
+        }
+        if (this.attackTarget.missChance > 0 && Math.random() < this.attackTarget.missChance) {
+            game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS (Blind)', '#ff6666');
             this.attackCooldown = this.attackSpeed;
             return;
         }
@@ -2955,7 +2969,6 @@ class Io extends Hero {
             this.cancelTeleport('ability');
             return;
         }
-        // Проверка уклонения (в родителе)
         super.performAttack();
     }
 
@@ -3024,10 +3037,410 @@ class Io extends Hero {
         super.draw(ctx, camera);
     }
 }
+
 // =========================================================================
-//  ВСПОМОГАТЕЛЬНЫЕ КЛАССЫ
+//  НОВЫЙ ГЕРОЙ: TINKER
 // =========================================================================
 
+class Tinker extends Hero {
+    constructor(x, y, team) {
+        super(x, y, team, 'Tinker');
+        this.maxHp = 560;
+        this.hp = 560;
+        this.damage = 52;
+        this.baseSpeed = 305;
+        this.speed = 305;
+        this.attackRange = 600;
+        this.attackSpeed = 1.2;
+        this.maxMp = 300;
+        this.mp = 300;
+        this.hpRegenBase = 2.0;
+        this.mpRegenBase = 1.8;
+
+        this.abilities.push(new Ability('Laser', 'active', 19, 40, 'Deals 150 pure damage and blinds the target for 3s (100% miss chance).'));
+        this.abilities.push(new Ability('March of the Machines', 'active', 32, 80, 'Summons machines that deal 22 damage on contact. Lasts 6s.'));
+        this.abilities.push(new Ability('Deploy Turrets', 'active', 24, 70, 'Deploys 3 turrets that fire rockets. Lasts 4.5s.'));
+        this.abilities.push(new Ability('Rearm', 'active', 5, 100, 'Channel for 2s to reset cooldowns of Q, W, E.'));
+
+        this.laserTarget = null;
+        this.machines = [];
+        this.turrets = [];
+        this.isRearming = false;
+        this.rearmTimer = 0;
+        this.rearmDuration = 2.0;
+        this._rearmStartX = 0;
+        this._rearmStartY = 0;
+        this._laserBeamLife = 0;
+        this._laserBeamTarget = null;
+        this.marchMachines = [];
+    }
+
+    useAbility(idx) {
+        if (this.isDead || this.silenceTimer > 0) return;
+        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); }
+        if (this.isRearming) {
+            this.cancelRearm('ability');
+            return;
+        }
+
+        if (idx === 0) {
+            this.castLaser();
+        } else if (idx === 1) {
+            this.castMarch();
+        } else if (idx === 2) {
+            this.castTurrets();
+        } else if (idx === 3) {
+            this.castRearm();
+        }
+    }
+
+    castLaser() {
+        const ab = this.abilities[0];
+        if (ab.currentCooldown > 0 || this.mp < ab.manaCost) return;
+        let target = this.attackTarget;
+        if (!target || target.isDead || target.team === this.team) {
+            const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+            target = enemies.find(e => Math.hypot(e.x - this.x, e.y - this.y) <= 700);
+        }
+        if (!target || target.isDead) return;
+        if (target.blockSpell && target.blockSpell(this)) return;
+        this.mp -= ab.manaCost;
+        ab.currentCooldown = ab.maxCooldown;
+        audio.play('ability');
+
+        target.takeDamage(150, this, false, 'pure');
+        target.missChance = 1.0;
+        target.missChanceTimer = 3.0;
+        this._laserBeamLife = 0.2;
+        this._laserBeamTarget = target;
+        game.uiManager.addFloatingText(target.x, target.y - 30, 'BLIND!', '#ffff00');
+    }
+
+    castMarch() {
+        const ab = this.abilities[1];
+        if (ab.currentCooldown > 0 || this.mp < ab.manaCost) return;
+        this.mp -= ab.manaCost;
+        ab.currentCooldown = ab.maxCooldown;
+        audio.play('ability');
+
+        const count = 12;
+        const radius = 300;
+        for (let i = 0; i < count; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 50 + Math.random() * radius;
+            const x = this.x + Math.cos(angle) * dist;
+            const y = this.y + Math.sin(angle) * dist;
+            const speed = 80 + Math.random() * 60;
+            const dirAngle = Math.random() * Math.PI * 2;
+            const machine = {
+                x: x,
+                y: y,
+                vx: Math.cos(dirAngle) * speed,
+                vy: Math.sin(dirAngle) * speed,
+                life: 6.0,
+                radius: 12,
+                damage: 22,
+                hitCooldown: {},
+                team: this.team,
+                owner: this,
+            };
+            this.marchMachines.push(machine);
+        }
+    }
+
+    castTurrets() {
+        const ab = this.abilities[2];
+        if (ab.currentCooldown > 0 || this.mp < ab.manaCost) return;
+        this.mp -= ab.manaCost;
+        ab.currentCooldown = ab.maxCooldown;
+        audio.play('ability');
+
+        let targetX = this.targetX;
+        let targetY = this.targetY;
+        if (this.attackTarget) {
+            targetX = this.attackTarget.x;
+            targetY = this.attackTarget.y;
+        }
+        for (let i = 0; i < 3; i++) {
+            const angle = (i / 3) * Math.PI * 2 + Math.random() * 0.5;
+            const dist = 60 + Math.random() * 40;
+            const x = targetX + Math.cos(angle) * dist;
+            const y = targetY + Math.sin(angle) * dist;
+            const turret = {
+                x: x,
+                y: y,
+                life: 4.5,
+                fallTimer: 0.5,
+                deployed: false,
+                hp: 80,
+                maxHp: 80,
+                attackRange: 200,
+                attackCooldown: 0,
+                attackSpeed: 1.5,
+                damage: 20 + (this.level - 1) * 20,
+                team: this.team,
+                owner: this,
+                target: null,
+                rocketCooldown: 0,
+            };
+            this.turrets.push(turret);
+        }
+    }
+
+    castRearm() {
+        const ab = this.abilities[3];
+        if (ab.currentCooldown > 0 || this.mp < ab.manaCost) return;
+        if (this.isRearming) return;
+        this.mp -= ab.manaCost;
+        ab.currentCooldown = ab.maxCooldown;
+        audio.play('ability');
+
+        this.isRearming = true;
+        this.rearmTimer = this.rearmDuration;
+        this._rearmStartX = this.x;
+        this._rearmStartY = this.y;
+        this.attackTarget = null;
+        this.targetX = this.x;
+        this.targetY = this.y;
+        this.isMovingToWaypoint = false;
+        game.uiManager.addFloatingText(this.x, this.y - 40, 'Rearming...', '#00ccff');
+    }
+
+    cancelRearm(reason = '') {
+        if (!this.isRearming) return;
+        this.isRearming = false;
+        this.rearmTimer = 0;
+        if (reason === 'move') {
+            game.uiManager.addFloatingText(this.x, this.y - 40, 'Rearm cancelled (moved)', '#ff6666');
+        } else if (reason === 'ability') {
+            game.uiManager.addFloatingText(this.x, this.y - 40, 'Rearm cancelled (ability)', '#ff6666');
+        } else if (reason === 'death') {
+            // не показываем
+        } else {
+            game.uiManager.addFloatingText(this.x, this.y - 40, 'Rearm cancelled', '#ff6666');
+        }
+    }
+
+    finishRearm() {
+        if (!this.isRearming) return;
+        this.isRearming = false;
+        for (let i = 0; i < 3; i++) {
+            if (this.abilities[i]) {
+                this.abilities[i].currentCooldown = 0;
+            }
+        }
+        game.uiManager.addFloatingText(this.x, this.y - 30, 'Rearm complete!', '#00ff00');
+    }
+
+    update(dt) {
+        if (this.isDead) return;
+        this.updateTeleport(dt);
+
+        if (this.missChanceTimer > 0) {
+            this.missChanceTimer -= dt;
+            if (this.missChanceTimer <= 0) {
+                this.missChance = 0;
+                this.missChanceTimer = 0;
+            }
+        }
+
+        if (this._laserBeamLife > 0) {
+            this._laserBeamLife -= dt;
+            if (this._laserBeamLife <= 0) {
+                this._laserBeamTarget = null;
+            }
+        }
+
+        for (let i = this.marchMachines.length - 1; i >= 0; i--) {
+            const m = this.marchMachines[i];
+            m.life -= dt;
+            if (m.life <= 0) {
+                this.marchMachines.splice(i, 1);
+                continue;
+            }
+            m.x += m.vx * dt;
+            m.y += m.vy * dt;
+            if (m.x < 0 || m.x > game.map.width) m.vx *= -1;
+            if (m.y < 0 || m.y > game.map.height) m.vy *= -1;
+            const enemies = m.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+            for (let e of enemies) {
+                if (e.isDead) continue;
+                const dist = Math.hypot(e.x - m.x, e.y - m.y);
+                if (dist < m.radius + e.radius) {
+                    const id = e.id || e._uid || (e.x + '' + e.y);
+                    if (!m.hitCooldown) m.hitCooldown = {};
+                    if (!m.hitCooldown[id] || m.hitCooldown[id] <= 0) {
+                        e.takeDamage(m.damage, m.owner);
+                        m.hitCooldown[id] = 0.5;
+                        game.uiManager.addFloatingText(e.x, e.y - 20, '-22', '#ff8800');
+                    }
+                }
+            }
+            for (let key in m.hitCooldown) {
+                m.hitCooldown[key] -= dt;
+                if (m.hitCooldown[key] < 0) m.hitCooldown[key] = 0;
+            }
+        }
+
+        for (let i = this.turrets.length - 1; i >= 0; i--) {
+            const t = this.turrets[i];
+            t.life -= dt;
+            if (t.life <= 0) {
+                this.turrets.splice(i, 1);
+                continue;
+            }
+            if (!t.deployed) {
+                t.fallTimer -= dt;
+                if (t.fallTimer <= 0) {
+                    t.deployed = true;
+                    const enemies = t.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+                    for (let e of enemies) {
+                        if (e.isDead) continue;
+                        const dist = Math.hypot(e.x - t.x, e.y - t.y);
+                        if (dist < 200) {
+                            e.takeDamage(40, t.owner);
+                            const angle = Math.atan2(e.y - t.y, e.x - t.x);
+                            const push = 25;
+                            e.x += Math.cos(angle) * push;
+                            e.y += Math.sin(angle) * push;
+                        }
+                    }
+                    const angleToTinker = Math.atan2(this.y - t.y, this.x - t.x);
+                    this.x += Math.cos(angleToTinker) * 50;
+                    this.y += Math.sin(angleToTinker) * 50;
+                    this.targetX = this.x;
+                    this.targetY = this.y;
+                }
+                continue;
+            }
+            t.attackCooldown -= dt;
+            if (t.attackCooldown <= 0) {
+                const enemies = t.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+                let target = null;
+                let minDist = Infinity;
+                for (let e of enemies) {
+                    if (e.isDead) continue;
+                    const dist = Math.hypot(e.x - t.x, e.y - t.y);
+                    if (dist <= t.attackRange && dist < minDist) {
+                        minDist = dist;
+                        target = e;
+                    }
+                }
+                if (target) {
+                    const damage = 20 + (this.level - 1) * 20;
+                    game.projectiles.push(new TurretRocket(t.x, t.y, target, damage, t.team, t.owner));
+                    t.attackCooldown = t.attackSpeed;
+                } else {
+                    t.attackCooldown = 0.1;
+                }
+            }
+        }
+
+        if (this.isRearming) {
+            const distMoved = Math.hypot(this.x - this._rearmStartX, this.y - this._rearmStartY);
+            if (distMoved > 5) {
+                this.cancelRearm('move');
+            } else if (this.isDead) {
+                this.cancelRearm('death');
+            } else {
+                this.rearmTimer -= dt;
+                if (this.rearmTimer <= 0) {
+                    this.finishRearm();
+                }
+            }
+        }
+
+        super.update(dt);
+    }
+
+    performAttack() {
+        if (this.isChannelingTeleport) {
+            this.cancelTeleport('ability');
+            return;
+        }
+        if (this.attackTarget && this.attackTarget.missChance > 0) {
+            if (Math.random() < this.attackTarget.missChance) {
+                game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS (Blind)', '#ff6666');
+                this.attackCooldown = this.attackSpeed;
+                return;
+            }
+        }
+        super.performAttack();
+    }
+
+    draw(ctx, camera) {
+        super.draw(ctx, camera);
+        const sx = this.x - camera.x;
+        const sy = this.y - camera.y;
+
+        if (this._laserBeamLife > 0 && this._laserBeamTarget && !this._laserBeamTarget.isDead) {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255, 50, 50, 0.8)';
+            ctx.lineWidth = 6;
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = '#ff0000';
+            ctx.beginPath();
+            ctx.moveTo(sx, sy - 10);
+            ctx.lineTo(this._laserBeamTarget.x - camera.x, this._laserBeamTarget.y - camera.y - 10);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        for (let m of this.marchMachines) {
+            const msx = m.x - camera.x;
+            const msy = m.y - camera.y;
+            ctx.save();
+            ctx.fillStyle = '#ffaa00';
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#ffaa00';
+            ctx.beginPath();
+            ctx.arc(msx, msy, m.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#000';
+            ctx.font = '8px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('M', msx, msy + 3);
+            ctx.restore();
+        }
+
+        for (let t of this.turrets) {
+            const tsx = t.x - camera.x;
+            const tsy = t.y - camera.y;
+            ctx.save();
+            if (!t.deployed) {
+                ctx.globalAlpha = 0.5 + 0.5 * (1 - t.fallTimer / 0.5);
+            }
+            ctx.fillStyle = '#2c3e50';
+            ctx.strokeStyle = '#7f8c8d';
+            ctx.lineWidth = 2;
+            ctx.fillRect(tsx - 12, tsy - 12, 24, 24);
+            ctx.strokeRect(tsx - 12, tsy - 12, 24, 24);
+            const hpW = 20;
+            ctx.fillStyle = '#000';
+            ctx.fillRect(tsx - hpW/2, tsy - 18, hpW, 3);
+            ctx.fillStyle = '#2ecc71';
+            ctx.fillRect(tsx - hpW/2, tsy - 18, hpW * (t.hp/t.maxHp), 3);
+            ctx.restore();
+        }
+
+        if (this.isRearming) {
+            ctx.save();
+            ctx.fillStyle = 'rgba(0, 200, 255, 0.3)';
+            ctx.beginPath();
+            ctx.arc(sx, sy, 30 + (1 - this.rearmTimer / this.rearmDuration) * 20, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#00ccff';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.stroke();
+            ctx.restore();
+        }
+    }
+}
+
+// =========================================================================
+//  ВСПОМОГАТЕЛЬНЫЙ КЛАСС ShrapnelZone (начало части 2)
+// =========================================================================
 class ShrapnelZone {
     constructor(x, y, team, caster) {
         this.x = x; this.y = y; this.team = team; this.caster = caster;
@@ -3055,7 +3468,6 @@ class ShrapnelZone {
         ctx.strokeStyle = 'rgba(218, 165, 32, 0.4)'; ctx.lineWidth = 2;
         ctx.fillStyle = 'rgba(218, 165, 32, 0.08)';
         ctx.beginPath(); ctx.arc(sx, sy, this.radius, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-        
         ctx.fillStyle = 'rgba(255, 215, 0, 0.25)';
         for (let i = 0; i < 4; i++) {
             let px = sx + (Math.random() - 0.5) * this.radius * 1.4;
@@ -3069,6 +3481,9 @@ class ShrapnelZone {
         ctx.restore();
     }
 }
+// =========================================================================
+//  ВСПОМОГАТЕЛЬНЫЕ КЛАССЫ (продолжение)
+// =========================================================================
 
 class Creep extends Entity {
     constructor(x, y, team, type, lane) {
@@ -3109,7 +3524,6 @@ class Creep extends Entity {
 
     findTarget() {
         const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
-        // Добавляем нейтральных крипов
         const neutrals = game.creeps.filter(c => c.team === 'neutral' && !c.isDead && c.isAttackable());
         enemies.push(...neutrals);
         
@@ -3163,9 +3577,13 @@ class Creep extends Entity {
                 let finalDamage = this.damage;
                 if (this.vladmirAura) finalDamage *= 1.18;
                 if (this.type === 'melee') {
-                    // Проверка уклонения у цели
+                    // Проверка уклонения и ослепления
                     if (this.attackTarget.evasion > 0 && Math.random() < this.attackTarget.evasion) {
                         game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS', '#ff6666');
+                        return;
+                    }
+                    if (this.attackTarget.missChance > 0 && Math.random() < this.attackTarget.missChance) {
+                        game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS (Blind)', '#ff6666');
                         return;
                     }
                     this.attackTarget.takeDamage(finalDamage, this);
@@ -3332,7 +3750,6 @@ class Catapult extends Entity {
 
     performAttack() {
         if (!this.attackTarget || this.attackTarget.isDead) return;
-        // Проверка уклонения у цели (для снарядов уклонение проверяется при попадании)
         let damage = this.damage;
         if (this.attackTarget instanceof Tower || this.attackTarget instanceof Ancient) {
             damage *= 2;
@@ -3574,15 +3991,17 @@ class Projectile {
         let dy = this.target.y - this.y;
         let dist = Math.hypot(dx, dy);
         if (dist < 12) {
-            // Проверка уклонения у цели (для снарядов от обычных атак)
-            // Но если это способность или магия, уклонение не работает
+            // Проверка уклонения и ослепления для обычных атак
             let isMagicDamage = false;
             if (this.isAss || this.isBurningSpear || this.isManaBreak) {
-                // Эти типы могут быть магией или особыми, не проверяем уклонение
+                // эти типы могут быть магией или особыми, не проверяем уклонение
             } else {
-                // Для обычных атак проверяем уклонение
                 if (this.target.evasion > 0 && Math.random() < this.target.evasion) {
                     game.uiManager.addFloatingText(this.target.x, this.target.y - 30, 'MISS', '#ff6666');
+                    return true;
+                }
+                if (this.target.missChance > 0 && Math.random() < this.target.missChance) {
+                    game.uiManager.addFloatingText(this.target.x, this.target.y - 30, 'MISS (Blind)', '#ff6666');
                     return true;
                 }
             }
@@ -3664,6 +4083,49 @@ class Projectile {
         else if (this.reflected) color = '#ff66ff';
         ctx.fillStyle = color;
         ctx.beginPath(); ctx.arc(sx, sy, this.radius, 0, Math.PI*2); ctx.fill();
+    }
+}
+
+class TurretRocket extends Projectile {
+    constructor(x, y, target, damage, team, attacker) {
+        super(x, y, target, damage, team, attacker);
+        this.speed = 600;
+        this.radius = 6;
+        this.color = '#ff6600';
+        this.explosionRadius = 100;
+    }
+    update(dt) {
+        if (!this.target || this.target.isDead) return true;
+        let dx = this.target.x - this.x;
+        let dy = this.target.y - this.y;
+        let dist = Math.hypot(dx, dy);
+        if (dist < 15) {
+            const enemies = this.team === 'radiant' ? game.direEntities() : game.radiantEntities();
+            for (let e of enemies) {
+                if (e.isDead) continue;
+                const d = Math.hypot(e.x - this.x, e.y - this.y);
+                if (d < this.explosionRadius) {
+                    e.takeDamage(this.damage, this.attacker);
+                    game.uiManager.addFloatingText(e.x, e.y - 20, '-' + this.damage, '#ff8800');
+                }
+            }
+            return true;
+        }
+        this.x += (dx / dist) * this.speed * dt;
+        this.y += (dy / dist) * this.speed * dt;
+        return false;
+    }
+    draw(ctx, camera) {
+        let sx = this.x - camera.x;
+        let sy = this.y - camera.y;
+        ctx.save();
+        ctx.fillStyle = this.color;
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = this.color;
+        ctx.beginPath();
+        ctx.arc(sx, sy, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
     }
 }
 
@@ -3926,9 +4388,13 @@ class NeutralCreep extends Entity {
 
     performAttack() {
         if (!this.attackTarget || this.attackTarget.isDead) return;
-        // Проверка уклонения
         if (this.attackTarget.evasion > 0 && Math.random() < this.attackTarget.evasion) {
             game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS', '#ff6666');
+            this.attackCooldown = this.attackSpeed;
+            return;
+        }
+        if (this.attackTarget.missChance > 0 && Math.random() < this.attackTarget.missChance) {
+            game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS (Blind)', '#ff6666');
             this.attackCooldown = this.attackSpeed;
             return;
         }
@@ -4122,7 +4588,7 @@ class NeutralCamp {
 }
 
 // =========================================================================
-//  ИИ БОТОВ (BotAI) — с исправлением selectTarget для нейтралов и добавлением Butterfly
+//  ИИ БОТОВ (BotAI) — с поддержкой Tinker, нейтралов, Butterfly
 // =========================================================================
 
 class BotAI {
@@ -4162,6 +4628,9 @@ class BotAI {
         } else if (name === 'Io') {
             this.build = ['ringhealth', 'vitality', 'ringtarrasque', 'reaver'];
             this.finalItems = ['vanguard', 'heart'];
+        } else if (name === 'Tinker') {
+            this.build = ['linkens', 'radiance'];
+            this.finalItems = ['linkens', 'radiance'];
         } else {
             this.build = [];
             this.finalItems = [];
@@ -4472,7 +4941,6 @@ class BotAI {
     selectTarget() {
         const hero = this.hero;
         const enemies = hero.team === 'radiant' ? this.game.direEntities() : this.game.radiantEntities();
-        // Добавляем нейтральных крипов
         const neutrals = this.game.creeps.filter(c => c.team === 'neutral' && !c.isDead && c.isAttackable());
         enemies.push(...neutrals);
         
@@ -4540,6 +5008,41 @@ class BotAI {
 
     useAbilities(target) {
         const hero = this.hero;
+        // Специфическая логика для Tinker
+        if (hero instanceof Tinker) {
+            if (hero.isRearming) return;
+            const enemies = hero.team === 'radiant' ? this.game.direEntities() : this.game.radiantEntities();
+            const nearEnemy = enemies.find(e => Math.hypot(e.x - hero.x, e.y - hero.y) < 700);
+            if (nearEnemy) {
+                if (hero.abilities[0].currentCooldown <= 0 && hero.mp >= hero.abilities[0].manaCost) {
+                    hero.useAbility(0);
+                    return;
+                }
+                if (hero.abilities[1].currentCooldown <= 0 && hero.mp >= hero.abilities[1].manaCost) {
+                    hero.useAbility(1);
+                    return;
+                }
+                if (hero.abilities[2].currentCooldown <= 0 && hero.mp >= hero.abilities[2].manaCost) {
+                    hero.useAbility(2);
+                    return;
+                }
+                if (hero.abilities[3].currentCooldown <= 0 && hero.mp >= hero.abilities[3].manaCost && !hero.isRearming) {
+                    hero.useAbility(3);
+                    return;
+                }
+            } else {
+                if (hero.abilities[3].currentCooldown <= 0 && hero.mp >= hero.abilities[3].manaCost && !hero.isRearming) {
+                    const q = hero.abilities[0], w = hero.abilities[1], e = hero.abilities[2];
+                    if (q.currentCooldown > 0 || w.currentCooldown > 0 || e.currentCooldown > 0) {
+                        hero.useAbility(3);
+                        return;
+                    }
+                }
+            }
+            return;
+        }
+
+        // Остальная логика для других героев (Anti-Mage и все остальные)
         if (hero instanceof AntiMage) {
             if (hero.abilities[2].currentCooldown <= 0 && hero.mp >= 50) {
                 const enemies = hero.team === 'radiant' ? this.game.direEntities() : this.game.radiantEntities();
@@ -4587,19 +5090,33 @@ class UIManager {
     }
     syncHUD() {
         let p = game.playerHero; if (!p) return;
-        document.getElementById('hero-level-badge').innerText = p.level;
-        document.getElementById('stat-damage').innerText = Math.floor(p.damage);
-        document.getElementById('stat-speed').innerText = Math.floor(p.speed);
-        document.getElementById('stat-range').innerText = Math.floor(p.attackRange);
-        document.getElementById('xp-bar').style.width = `${(p.xp / p.maxXp) * 100}%`;
-        document.getElementById('xp-text').innerText = `${p.xp}/${p.maxXp} XP`;
-        document.getElementById('hp-indicator').style.width = `${(p.hp / p.maxHp) * 100}%`;
-        document.getElementById('hp-text').innerText = `${Math.floor(p.hp)}/${p.maxHp}`;
-        document.getElementById('hp-regen-text').innerText = `+${p.getHpRegen().toFixed(1)}`;
-        document.getElementById('mp-indicator').style.width = p.maxMp > 0 ? `${(p.mp / p.maxMp) * 100}%` : '0%';
-        document.getElementById('mp-text').innerText = p.maxMp > 0 ? `${Math.floor(p.mp)}/${p.maxMp}` : '0/0';
-        document.getElementById('mp-regen-text').innerText = p.maxMp > 0 ? `+${p.getMpRegen().toFixed(1)}` : '+0.0';
-        document.getElementById('gold-value').innerText = Math.floor(p.gold);
+        const heroLevelBadge = document.getElementById('hero-level-badge');
+        const statDamage = document.getElementById('stat-damage');
+        const statSpeed = document.getElementById('stat-speed');
+        const statRange = document.getElementById('stat-range');
+        const xpBar = document.getElementById('xp-bar');
+        const xpText = document.getElementById('xp-text');
+        const hpIndicator = document.getElementById('hp-indicator');
+        const hpText = document.getElementById('hp-text');
+        const hpRegenText = document.getElementById('hp-regen-text');
+        const mpIndicator = document.getElementById('mp-indicator');
+        const mpText = document.getElementById('mp-text');
+        const mpRegenText = document.getElementById('mp-regen-text');
+        const goldValue = document.getElementById('gold-value');
+
+        if (heroLevelBadge) heroLevelBadge.innerText = p.level;
+        if (statDamage) statDamage.innerText = Math.floor(p.damage);
+        if (statSpeed) statSpeed.innerText = Math.floor(p.speed);
+        if (statRange) statRange.innerText = Math.floor(p.attackRange);
+        if (xpBar) xpBar.style.width = `${(p.xp / p.maxXp) * 100}%`;
+        if (xpText) xpText.innerText = `${p.xp}/${p.maxXp} XP`;
+        if (hpIndicator) hpIndicator.style.width = `${(p.hp / p.maxHp) * 100}%`;
+        if (hpText) hpText.innerText = `${Math.floor(p.hp)}/${p.maxHp}`;
+        if (hpRegenText) hpRegenText.innerText = `+${p.getHpRegen().toFixed(1)}`;
+        if (mpIndicator) mpIndicator.style.width = p.maxMp > 0 ? `${(p.mp / p.maxMp) * 100}%` : '0%';
+        if (mpText) mpText.innerText = p.maxMp > 0 ? `${Math.floor(p.mp)}/${p.maxMp}` : '0/0';
+        if (mpRegenText) mpRegenText.innerText = p.maxMp > 0 ? `+${p.getMpRegen().toFixed(1)}` : '+0.0';
+        if (goldValue) goldValue.innerText = Math.floor(p.gold);
 
         const profileIcon = document.getElementById('hero-profile-icon');
         if (profileIcon) {
@@ -4629,6 +5146,9 @@ class UIManager {
                 } else if (heroKey === 'Io') {
                     profileIcon.src = 'images/io_profile.png';
                     profileIcon.alt = 'Io profile';
+                } else if (heroKey === 'Tinker') {
+                    profileIcon.src = 'images/Tinker_icon.png';
+                    profileIcon.alt = 'Tinker profile';
                 } else {
                     profileIcon.src = '';
                     profileIcon.alt = '';
@@ -4639,12 +5159,15 @@ class UIManager {
         }
 
         let t = game.matchTime;
-        document.getElementById('match-timer').innerText = `${Math.floor(t/60).toString().padStart(2,'0')}:${Math.floor(t%60).toString().padStart(2,'0')}`;
+        const matchTimer = document.getElementById('match-timer');
+        if (matchTimer) matchTimer.innerText = `${Math.floor(t/60).toString().padStart(2,'0')}:${Math.floor(t%60).toString().padStart(2,'0')}`;
         let rt = game.ancients.find(a => a.team === 'radiant');
         let dt = game.ancients.find(a => a.team === 'dire');
         if (rt && dt) {
-            document.getElementById('radiant-throne-hp').innerText = `${Math.ceil((rt.hp/rt.maxHp)*100)}%`;
-            document.getElementById('dire-throne-hp').innerText = `${Math.ceil((dt.hp/dt.maxHp)*100)}%`;
+            const radiantThroneHp = document.getElementById('radiant-throne-hp');
+            const direThroneHp = document.getElementById('dire-throne-hp');
+            if (radiantThroneHp) radiantThroneHp.innerText = `${Math.ceil((rt.hp/rt.maxHp)*100)}%`;
+            if (direThroneHp) direThroneHp.innerText = `${Math.ceil((dt.hp/dt.maxHp)*100)}%`;
         }
         
         for (let i = 0; i < 4; i++) {
@@ -4841,7 +5364,7 @@ class UIManager {
 }
 
 // =========================================================================
-//  ОСНОВНОЙ КЛАСС ИГРЫ (Game) — С НОВОЙ ЛОГИКОЙ ВЫБОРА РОЛЕЙ И БОТОВ, ДОБАВЛЕН BUTTERFLY
+//  ОСНОВНОЙ КЛАСС ИГРЫ (Game) — С НОВОЙ ЛОГИКОЙ ВЫБОРА РОЛЕЙ, БОТОВ, TINKER
 // =========================================================================
 
 class Game {
@@ -4886,11 +5409,10 @@ class Game {
         this.initShopItems();
     }
 
-    // Новая функция: выбор героя для бота по роли
     pickHeroForRole(role, usedHeroes) {
-        const allHeroes = ['Morphling', 'Warlock', 'Sniper', 'Bristleback', 'Huskar', 'Anti-Mage', 'Broodmother', 'Io'];
+        const allHeroes = ['Morphling', 'Warlock', 'Sniper', 'Bristleback', 'Huskar', 'Anti-Mage', 'Broodmother', 'Io', 'Tinker'];
         const supportPool = ['Io', 'Warlock'];
-        const midPool = ['Sniper', 'Huskar', 'Broodmother'];
+        const midPool = ['Sniper', 'Huskar', 'Broodmother', 'Tinker'];
         const carryPool = ['Anti-Mage', 'Morphling', 'Huskar', 'Bristleback', 'Sniper'];
         const offlanePool = allHeroes.filter(h => !supportPool.includes(h));
 
@@ -4909,7 +5431,6 @@ class Game {
         return available[Math.floor(Math.random() * available.length)];
     }
 
-    // Определение линии по роли и команде
     getLaneForRole(role, team) {
         if (role === 2) return 'mid';
         if (team === 'radiant') {
@@ -4925,18 +5446,15 @@ class Game {
         const playerRole = role;
         const remainingRoles = allRoles.filter(r => r !== playerRole);
 
-        // Создаём игрока
         const radiantStart = this.map.radiantBase;
         this.playerHero = this.createHero(selectedHeroName, radiantStart.x, radiantStart.y, 'radiant', playerRole);
-        this.playerHero.role = playerRole; // сохраняем роль
+        this.playerHero.role = playerRole;
 
-        // Союзные боты (Radiant)
         const usedHeroes = [selectedHeroName];
         for (let r of remainingRoles) {
             const heroName = this.pickHeroForRole(r, usedHeroes);
             usedHeroes.push(heroName);
             const lane = this.getLaneForRole(r, 'radiant');
-            // Стартовая позиция - база с небольшим смещением
             const startX = radiantStart.x + (r * 30) - 60;
             const startY = radiantStart.y - (r * 20) - 40;
             const hero = this.createHero(heroName, startX, startY, 'radiant', r);
@@ -4945,8 +5463,6 @@ class Game {
             this.alliedBots.push(hero);
         }
 
-        // Вражеская команда (Dire)
-        // Случайно выбираем роль для вражеского героя
         const enemyRole = allRoles[Math.floor(Math.random() * allRoles.length)];
         const direStart = this.map.direBase;
         const enemyHeroName = this.pickHeroForRole(enemyRole, []);
@@ -4966,11 +5482,9 @@ class Game {
             this.enemyBots.push(hero);
         }
 
-        // Назначаем AI для вражеского героя
         const enemyLane = this.getLaneForRole(enemyRole, 'dire');
         this.enemyHero.ai = new BotAI(this.enemyHero, enemyLane, this);
 
-        // Скрываем экраны выбора и показываем игру
         document.getElementById('role-selection').classList.add('hidden');
         document.getElementById('hero-selection').classList.add('hidden');
         document.getElementById('game-screen').classList.remove('hidden');
@@ -5001,65 +5515,134 @@ class Game {
         if (!shopList) return;
         if (shopList.querySelector('[data-item="butterfly"]')) return;
 
-        const butterflyItem = document.createElement('div');
-        butterflyItem.className = 'shop-item';
-        butterflyItem.setAttribute('data-item', 'butterfly');
-        butterflyItem.innerHTML = `
-            <img class="shop-item-icon" src="images/butterfly_icon.png" alt="Butterfly">
-            <div class="shop-item-info">
-                <h3>🦋 Butterfly</h3>
-                <p>Price: 2500 🪙</p>
-                <p>+35 Agility</p>
-                <p>+35% Evasion</p>
-                <p>+25 Damage</p>
-            </div>
-        `;
-        butterflyItem.addEventListener('click', () => this.buyItem('butterfly'));
-        shopList.appendChild(butterflyItem);
+        const items = [
+            {
+                id: 'boots',
+                title: '👢 Boots of Speed',
+                price: 500,
+                stats: ['+30 Movement Speed'],
+                icon: 'images/Boots_of_speed_icon.webp',
+                emoji: '👢',
+                desc: 'Basic movement boots.'
+            },
+            {
+                id: 'sword',
+                title: '⚔️ Crystalys',
+                price: 1500,
+                stats: ['+32 Damage', '+30% Crit Chance', '+60% Crit Multiplier'],
+                icon: 'images/Crystalys_icon.webp',
+                emoji: '⚔️',
+                desc: 'High burst damage.'
+            },
+            {
+                id: 'vitality',
+                title: '💚 Vitality Booster',
+                price: 1000,
+                stats: ['+250 Health'],
+                icon: 'images/Vitality_booster_icon.webp',
+                emoji: '💚',
+                desc: 'Simple survivability item.'
+            },
+            {
+                id: 'ringhealth',
+                title: '💍 Ring of Health',
+                price: 400,
+                stats: ['+4.5 HP Regen'],
+                icon: '',
+                emoji: '💍',
+                desc: 'Great sustain.'
+            },
+            {
+                id: 'vladmir',
+                title: '🛡️ Vladmir\'s Offering',
+                price: 1500,
+                stats: ['+0.75 Mana Regen', '+1 Armor'],
+                icon: 'images/vladimirs_offering.png',
+                emoji: '🛡️',
+                desc: 'Team sustain and armor.'
+            },
+            {
+                id: 'linkens',
+                title: '🛡️ Linken\'s Sphere',
+                price: 1500,
+                stats: ['+200 Health', '+200 Mana', '+15 Damage', '+5 Mana Regen'],
+                icon: 'images/sphere.png',
+                emoji: '🛡️',
+                desc: 'Defensive spell block.'
+            },
+            {
+                id: 'butterfly',
+                title: '🦋 Butterfly',
+                price: 2500,
+                stats: ['+35 Agility', '+35% Evasion', '+25 Damage'],
+                icon: '',
+                emoji: '🦋',
+                desc: 'Deadly agility carry item.'
+            },
+            {
+                id: 'ringtarrasque',
+                title: '💍 Ring of Tarrasque',
+                price: 1700,
+                stats: ['+12 HP Regen'],
+                icon: '',
+                emoji: '💍',
+                desc: 'Tanky sustain item.'
+            },
+            {
+                id: 'reaver',
+                title: '⚔️ Reaver',
+                price: 2500,
+                stats: ['+25 Health'],
+                icon: '',
+                emoji: '⚔️',
+                desc: 'Reliable health scaling.'
+            },
+            {
+                id: 'radiance',
+                title: '🔥 Radiance',
+                price: 1500,
+                stats: ['+20 Damage', 'Burns nearby enemies'],
+                icon: '',
+                emoji: '🔥',
+                desc: 'Strong teamfight damage item.'
+            }
+        ];
 
-        const ringItem = document.createElement('div');
-        ringItem.className = 'shop-item';
-        ringItem.setAttribute('data-item', 'ringtarrasque');
-        ringItem.innerHTML = `
-            <img class="shop-item-icon" src="images/ring_of_tarrasque_icon.png" alt="Ring of Tarrasque">
-            <div class="shop-item-info">
-                <h3>💍 Ring of Tarrasque</h3>
-                <p>Price: 1700 🪙</p>
-                <p>Bonus: +12 HP regen</p>
-            </div>
-        `;
-        ringItem.addEventListener('click', () => this.buyItem('ringtarrasque'));
-        shopList.appendChild(ringItem);
+        items.forEach(item => {
+            const el = document.createElement('div');
+            el.className = 'shop-item';
+            el.setAttribute('data-item', item.id);
 
-        const reaverItem = document.createElement('div');
-        reaverItem.className = 'shop-item';
-        reaverItem.setAttribute('data-item', 'reaver');
-        reaverItem.innerHTML = `
-            <img class="shop-item-icon" src="images/reaver_icon.png" alt="Reaver">
-            <div class="shop-item-info">
-                <h3>⚔️ Reaver</h3>
-                <p>Price: 2500 🪙</p>
-                <p>Bonus: +25 Health</p>
-            </div>
-        `;
-        reaverItem.addEventListener('click', () => this.buyItem('reaver'));
-        shopList.appendChild(reaverItem);
+            const iconWrap = document.createElement('div');
+            iconWrap.className = 'shop-item-icon-wrap';
 
-        const radianceItem = document.createElement('div');
-        radianceItem.className = 'shop-item';
-        radianceItem.setAttribute('data-item', 'radiance');
-        radianceItem.innerHTML = `
-            <img class="shop-item-icon" src="images/radiance_icon.png" alt="Radiance">
-            <div class="shop-item-info">
-                <h3>🔥 Radiance</h3>
-                <p>Price: 1500 🪙</p>
-                <p>Bonus: +20 damage</p>
-                <p>Passive: Burns nearby enemies for 20 magic damage/sec.</p>
-                <p>Enemies in radius have 5% miss chance.</p>
-            </div>
-        `;
-        radianceItem.addEventListener('click', () => this.buyItem('radiance'));
-        shopList.appendChild(radianceItem);
+            if (item.icon) {
+                const img = document.createElement('img');
+                img.className = 'shop-item-icon';
+                img.src = item.icon;
+                img.alt = item.title;
+                img.onerror = () => {
+                    iconWrap.innerHTML = `<div class="shop-item-icon-fallback">${item.emoji}</div>`;
+                };
+                iconWrap.appendChild(img);
+            } else {
+                iconWrap.innerHTML = `<div class="shop-item-icon-fallback">${item.emoji}</div>`;
+            }
+
+            const info = document.createElement('div');
+            info.className = 'shop-item-info';
+            info.innerHTML = `
+                <h3>${item.title}</h3>
+                <p>Price: ${item.price} 🪙</p>
+                ${item.stats.map(stat => `<p>${stat}</p>`).join('')}
+                <p>${item.desc}</p>
+            `;
+
+            el.appendChild(iconWrap);
+            el.appendChild(info);
+            el.addEventListener('click', () => this.buyItem(item.id));
+            shopList.appendChild(el);
+        });
     }
 
     getAllHeroes() {
@@ -5150,6 +5733,7 @@ class Game {
         else if (name === 'Anti-Mage') hero = new AntiMage(x, y, team);
         else if (name === 'Broodmother') hero = new Broodmother(x, y, team);
         else if (name === 'Io') hero = new Io(x, y, team);
+        else if (name === 'Tinker') hero = new Tinker(x, y, team);
         else hero = new Sniper(x, y, team);
         hero.role = role;
         return hero;
@@ -5234,7 +5818,6 @@ class Game {
             for (let c of this.creeps) {
                 if (c.team === enemyTeam && !c.isDead && c.isAttackable()) possibleTargets.push(c);
             }
-            // Добавляем нейтральных крипов
             for (let c of this.creeps) {
                 if (c.team === 'neutral' && !c.isDead && c.isAttackable()) {
                     possibleTargets.push(c);
@@ -5269,66 +5852,68 @@ class Game {
             }
         });
 
-        document.getElementById('minimapCanvas').addEventListener('click', (e) => {
-            const player = this.playerHero;
-            if (player instanceof Io && player.isRelocateSelectMode) {
-                const mCanvas = document.getElementById('minimapCanvas');
-                const rect = mCanvas.getBoundingClientRect();
-                const scaleX = mCanvas.width / rect.width;
-                const scaleY = mCanvas.height / rect.height;
+        const minimapCanvas = document.getElementById('minimapCanvas');
+        if (minimapCanvas) {
+            minimapCanvas.addEventListener('click', (e) => {
+                const player = this.playerHero;
+                if (player instanceof Io && player.isRelocateSelectMode) {
+                    const rect = minimapCanvas.getBoundingClientRect();
+                    const scaleX = minimapCanvas.width / rect.width;
+                    const scaleY = minimapCanvas.height / rect.height;
+                    const mx = (e.clientX - rect.left) * scaleX;
+                    const my = (e.clientY - rect.top) * scaleY;
+                    if (mx < 0 || mx > minimapCanvas.width || my < 0 || my > minimapCanvas.height) return;
+
+                    const map = this.map;
+                    const gx = (mx / minimapCanvas.width) * map.width;
+                    const gy = (my / minimapCanvas.height) * map.height;
+                    player.startRelocate(gx, gy);
+                    player.isRelocateSelectMode = false;
+                    this._relocateSelectionMode = false;
+                    e.stopPropagation();
+                    e.preventDefault();
+                    return;
+                }
+
+                if (!this._teleportSelectionMode || !this.playerHero || this.playerHero.isDead || this.playerHero.teleportCharges <= 0 || this.playerHero.isChannelingTeleport) {
+                    return;
+                }
+                const rect = minimapCanvas.getBoundingClientRect();
+                const scaleX = minimapCanvas.width / rect.width;
+                const scaleY = minimapCanvas.height / rect.height;
                 const mx = (e.clientX - rect.left) * scaleX;
                 const my = (e.clientY - rect.top) * scaleY;
-                if (mx < 0 || mx > mCanvas.width || my < 0 || my > mCanvas.height) return;
+                if (mx < 0 || mx > minimapCanvas.width || my < 0 || my > minimapCanvas.height) return;
 
                 const map = this.map;
-                const gx = (mx / mCanvas.width) * map.width;
-                const gy = (my / mCanvas.height) * map.height;
-                player.startRelocate(gx, gy);
-                player.isRelocateSelectMode = false;
-                this._relocateSelectionMode = false;
-                e.stopPropagation();
-                e.preventDefault();
-                return;
-            }
-
-            if (!this._teleportSelectionMode || !this.playerHero || this.playerHero.isDead || this.playerHero.teleportCharges <= 0 || this.playerHero.isChannelingTeleport) {
-                return;
-            }
-            const mCanvas = document.getElementById('minimapCanvas');
-            const rect = mCanvas.getBoundingClientRect();
-            const scaleX = mCanvas.width / rect.width;
-            const scaleY = mCanvas.height / rect.height;
-            const mx = (e.clientX - rect.left) * scaleX;
-            const my = (e.clientY - rect.top) * scaleY;
-            if (mx < 0 || mx > mCanvas.width || my < 0 || my > mCanvas.height) return;
-
-            const map = this.map;
-            const gx = (mx / mCanvas.width) * map.width;
-            const gy = (my / mCanvas.height) * map.height;
-            const clickRadiusPx = 15;
-            let closestTower = null;
-            let minDist = Infinity;
-            for (let t of this.towers) {
-                if (t.team === this.playerHero.team && !t.isDead) {
-                    const tx = (t.x / map.width) * mCanvas.width;
-                    const ty = (t.y / map.height) * mCanvas.height;
-                    const d = Math.hypot(mx - tx, my - ty);
-                    if (d < minDist && d <= clickRadiusPx) {
-                        minDist = d;
-                        closestTower = t;
+                const gx = (mx / minimapCanvas.width) * map.width;
+                const gy = (my / minimapCanvas.height) * map.height;
+                const clickRadiusPx = 15;
+                let closestTower = null;
+                let minDist = Infinity;
+                for (let t of this.towers) {
+                    if (t.team === this.playerHero.team && !t.isDead) {
+                        const tx = (t.x / map.width) * minimapCanvas.width;
+                        const ty = (t.y / map.height) * minimapCanvas.height;
+                        const d = Math.hypot(mx - tx, my - ty);
+                        if (d < minDist && d <= clickRadiusPx) {
+                            minDist = d;
+                            closestTower = t;
+                        }
                     }
                 }
-            }
-            if (closestTower) {
-                this.playerHero.startTeleport(closestTower);
-                this._teleportSelectionMode = false;
-                e.stopPropagation();
-                e.preventDefault();
-            }
-        });
+                if (closestTower) {
+                    this.playerHero.startTeleport(closestTower);
+                    this._teleportSelectionMode = false;
+                    e.stopPropagation();
+                    e.preventDefault();
+                }
+            });
+        }
 
         window.addEventListener('keydown', (e) => {
             const k = e.key.toLowerCase();
+            if (!this.playerHero || this.playerHero.isDead) return;
             if (k === 'q' || k === 'й') this.playerHero.useAbility(0);
             if (k === 'w' || k === 'ц') this.playerHero.useAbility(1);
             if (k === 'e' || k === 'у') this.playerHero.useAbility(2); 
@@ -5350,18 +5935,24 @@ class Game {
             }
         });
 
-        document.getElementById('open-shop-btn').addEventListener('click', () => this.toggleShop());
-        document.getElementById('glyph-btn')?.addEventListener('click', () => this.activateGlyph());
-        document.getElementById('close-shop-btn').addEventListener('click', () => this.toggleShop());
+        const openShopBtn = document.getElementById('open-shop-btn');
+        if (openShopBtn) openShopBtn.addEventListener('click', () => this.toggleShop());
+        const glyphBtn = document.getElementById('glyph-btn');
+        if (glyphBtn) glyphBtn.addEventListener('click', () => this.activateGlyph());
+        const closeShopBtn = document.getElementById('close-shop-btn');
+        if (closeShopBtn) closeShopBtn.addEventListener('click', () => this.toggleShop());
         document.querySelectorAll('.shop-item').forEach(el => {
             el.addEventListener('click', () => this.buyItem(el.getAttribute('data-item')));
         });
-        document.getElementById('ability-1').addEventListener('contextmenu', (e) => {
-            e.preventDefault();
-            if (this.playerHero && this.playerHero.name === 'Huskar') {
-                this.playerHero.useAbility(1);
-            }
-        });
+        const ability1Button = document.getElementById('ability-1');
+        if (ability1Button) {
+            ability1Button.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                if (this.playerHero && this.playerHero.name === 'Huskar') {
+                    this.playerHero.useAbility(1);
+                }
+            });
+        }
     }
 
     toggleShop() { document.getElementById('shop-modal').classList.toggle('hidden'); }
@@ -5612,7 +6203,6 @@ let selectedRole = 0;
 document.addEventListener('DOMContentLoaded', function() {
     game = new Game();
 
-    // Обработчики для выбора роли
     const roleBtns = document.querySelectorAll('.role-btn');
     roleBtns.forEach(btn => {
         btn.addEventListener('click', function() {
@@ -5622,7 +6212,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // Обработчики для выбора героя
     const heroCards = document.querySelectorAll('.hero-card');
     heroCards.forEach(card => {
         card.addEventListener('click', function() {

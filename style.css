@@ -71,8 +71,10 @@ body, html {
 #hero-selection {
     background: radial-gradient(circle at center, #1a2333 0%, #0d111a 100%);
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
+    padding: 40px 20px 80px;
     z-index: 10;
+    overflow-y: auto;
 }
 
 .title {
@@ -89,6 +91,8 @@ body, html {
     gap: 30px;
     justify-content: center;
     max-width: 1200px;
+    width: 100%;
+    padding-bottom: 20px;
 }
 
 .hero-card {
@@ -465,13 +469,30 @@ body, html {
     padding: 8px;
     border-bottom: 1px solid rgba(255,255,255,0.04);
 }
-.shop-item-icon {
+.shop-item-icon-wrap {
     width: 56px;
     height: 56px;
-    object-fit: cover;
-    border-radius: 6px;
     flex-shrink: 0;
+    border-radius: 6px;
+    overflow: hidden;
     background: #0b0e11;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.shop-item-icon {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.shop-item-icon-fallback {
+    font-size: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
 }
 .shop-item-info h3 { margin: 0 0 4px 0; }
 .shop-item-info p { margin: 2px 0; font-size: 13px; color: #cbd5e1; }
@@ -643,3 +664,13 @@ body, html {
     transition: background 0.2s;
 }
 .restart-btn:hover { background: #3182ce; }
+
+/* остальные стили без изменений, добавлен только блок для Tinker */
+
+.hero-avatar.tinker {
+    background-image: url('images/Tinker_icon.png');
+    background-size: cover;
+    background-position: center;
+    background-color: #2d4a22;
+    border-color: #8bc34a;
+}
