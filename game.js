@@ -6230,4 +6230,4 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     });
-});
+}); 

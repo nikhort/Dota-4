@@ -662,7 +662,7 @@ body, html {
     border-radius: 6px;
     cursor: pointer;
     transition: background 0.2s;
-}
+} 
 .restart-btn:hover { background: #3182ce; }
 
 /* остальные стили без изменений, добавлен только блок для Tinker */
