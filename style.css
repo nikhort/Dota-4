@@ -25,16 +25,8 @@ body, html {
     flex-direction: column;
 }
 
-.hidden {
-    display: none !important;
-}
-
-/* Экран выбора роли */
-#role-selection {
-    background: radial-gradient(circle at center, #1a2333 0%, #0d111a 100%);
-    align-items: center;
-    justify-content: center;
-    z-index: 15;
+.hidden{
+    display:none !important;
 }
 
 .role-container {
@@ -673,4 +665,42 @@ body, html {
     background-position: center;
     background-color: #2d4a22;
     border-color: #8bc34a;
+}
+/* === ГАРАНТИЯ КЛИКАБЕЛЬНОСТИ ЭКРАНА ВЫБОРА РОЛИ === */
+#role-selection {
+    position: fixed;
+    top:0;
+    left:0;
+    width:100vw;
+    height:100vh;
+    z-index:999999;
+    pointer-events:auto;
+
+    display:flex;
+    align-items:center;
+    justify-content:center;
+
+    background:radial-gradient(circle at center,#1a2333 0%,#0d111a 100%);
+}
+
+/* Все элементы внутри экрана выбора – кликабельны */
+#role-selection * {
+    pointer-events: auto !important;
+}
+
+/* Все скрытые экраны НЕ должны получать клики */
+.hidden {
+    display: none !important;
+    pointer-events: none !important;
+}
+
+/* Если вдруг какой-то родительский блок мешает – принудительно убираем */
+.screen {
+    pointer-events: auto;  /* по умолчанию разрешаем */
+}
+
+/* Убедимся, что кнопки ролей тоже кликабельны */
+.role-btn {
+    pointer-events: auto !important;
+    cursor: pointer !important;
 }
