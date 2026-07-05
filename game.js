@@ -54,6 +54,22 @@ class AudioManager {
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 const audio = new AudioManager();
+let audioUnlocked = false;
+
+function unlockAudio() {
+    if (audioUnlocked) return;
+    audioUnlocked = true;
+    audio.init();
+    if (audio.ctx && audio.ctx.state === 'suspended') {
+        audio.ctx.resume().catch(() => {});
+    }
+}
+
+window.addEventListener('pointerdown', unlockAudio, { once: true });
+window.addEventListener('keydown', unlockAudio, { once: true });
+window.addEventListener('touchstart', unlockAudio, { once: true });
+canvas.addEventListener('pointerdown', unlockAudio, { once: true });
+canvas.addEventListener('touchstart', unlockAudio, { once: true });
 
 function resizeCanvas() {
     canvas.width = window.innerWidth;
