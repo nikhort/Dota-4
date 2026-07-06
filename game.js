@@ -632,7 +632,7 @@ class Hero extends Entity {
         this.level = 1;
         this.xp = 0;
         this.maxXp = 100;
-        this.gold = 100;
+        this.gold = 50000;
         this.inventory = new Inventory(this);
         this.abilities = [];
 
@@ -678,8 +678,17 @@ class Hero extends Entity {
     }
 
     getHpRegen() {
-        return this.hpRegenBase + (this.inventoryHpRegen || 0);
+    let base = this.hpRegenBase + (this.inventoryHpRegen || 0);
+    // Бонус от Heart of Tarrasque (1.5% от недостающего здоровья)
+    if (this.inventory && this.inventory.items) {
+        const heart = this.inventory.items.find(item => item.id === 'heart');
+        if (heart) {
+            const missing = this.maxHp - this.hp;
+            base += missing * 0.015; // 1.5%
+        }
     }
+    return base;
+}
     getMpRegen() {
         return this.mpRegenBase + (this.inventoryManaRegen || 0);
     }
@@ -921,6 +930,8 @@ class Morphling extends Hero {
         this.minStatLimit = 6; 
         this.morphBaseHp = this.maxHp;
         this.morphBaseDamage = this.damage;
+        this.maxMp = 300;
+        this.mp = 300;
 
         this.abilities.push(new Ability('Waveform', 'active', 10, 90, 'Dash forward, dealing 150 damage to all enemies in the path.'));
         this.waveformTimer = 0; this.wdx = 0; this.wdy = 0; this.wHits = [];
@@ -1777,9 +1788,33 @@ class AntiMage extends Hero {
     }
 
     performAttack() {
-        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
-        super.performAttack();
+    if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
+    if (!this.attackTarget || this.attackTarget.isDead) return;
+    if (this.attackCooldown > 0) return;
+    this.attackCooldown = this.attackSpeed;
+
+    // Проверка на уклонение
+    if (this.attackTarget.evasion > 0 && Math.random() < this.attackTarget.evasion) {
+        game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 30, 'MISS', '#ff6666');
+        return;
     }
+    if (this.missChance > 0 && Math.random() < this.missChance) {
+        game.uiManager.addFloatingText(this.x, this.y - 30, 'MISS (Blind)', '#ff6666');
+        return;
+    }
+
+    let damage = this.damage;
+    // Проверка крита (если есть предмет)
+    let critItem = this.inventory.items.find(i => i.stats.critChance);
+    if (critItem && Math.random() < critItem.stats.critChance) {
+        damage *= critItem.stats.critMultiplier || 1.6;
+        game.uiManager.addFloatingText(this.attackTarget.x, this.attackTarget.y - 45, 'CRIT!', '#ff0000');
+    }
+
+    const proj = new Projectile(this.x, this.y, this.attackTarget, damage, this.team, this);
+    proj.isManaBreak = true; // ★★★ ВАЖНО: устанавливаем флаг для сжигания маны ★★★
+    game.projectiles.push(proj);
+}
 
     useAbility(idx) {
         if (this.isDead || this.silenceTimer > 0) return;
