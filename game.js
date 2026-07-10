@@ -632,7 +632,7 @@ class Hero extends Entity {
         this.level = 1;
         this.xp = 0;
         this.maxXp = 100;
-        this.gold = 50000;
+        this.gold = 200;
         this.inventory = new Inventory(this);
         this.abilities = [];
 
@@ -4756,7 +4756,7 @@ class BountyRune {
         this.radius = 12; this.clickRadius = 35;
         this.isSpawned = true;
         this.respawnTimer = 0;
-        this.respawnCooldown = 60;
+        this.respawnCooldown = 30;
         this.goldReward = 70;
         this.color = '#f59e0b';
     }
