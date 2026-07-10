@@ -5221,13 +5221,13 @@ class BotAI {
         this.buildTimer = 0;
         const name = hero.name;
         if (name === 'Huskar') {
-            this.build = ['ringhealth', 'vitality', 'ringtarrasque', 'reaver', 'butterfly'];
+            this.build = ['bracer', 'ringhealth', 'vitality', 'ringtarrasque', 'reaver', 'butterfly'];
             this.finalItems = ['vanguard', 'heart', 'butterfly'];
         } else if (name === 'Anti-Mage') {
-            this.build = ['radiance', 'butterfly'];
-            this.finalItems = ['radiance', 'butterfly'];
+            this.build = ['bracer', 'radiance', 'butterfly'];
+            this.finalItems = ['bracer', 'radiance', 'butterfly'];
         } else if (name === 'Sniper') {
-            this.build = ['sword', 'butterfly'];
+            this.build = ['bracer', 'sword', 'butterfly'];
             this.finalItems = ['sword', 'butterfly'];
         } else if (name === 'Morphling') {
             this.build = ['vladmir', 'linkens', 'butterfly'];
@@ -5240,7 +5240,7 @@ class BotAI {
             this.finalItems = ['vanguard', 'heart', 'butterfly'];
         } else if (name === 'Io') {
             this.build = ['ringhealth', 'vitality', 'ringtarrasque', 'reaver'];
-            this.finalItems = ['vanguard', 'heart'];
+            this.finalItems = ['bracer', 'vanguard', 'heart'];
         } else if (name === 'Tinker') {
             this.build = ['linkens', 'radiance'];
             this.finalItems = ['linkens', 'radiance'];
@@ -5249,7 +5249,7 @@ class BotAI {
             this.finalItems = [];
         }
         this.currentFinalItemIndex = 0;
-        this.hero.gold = 100;
+        this.hero.gold = 200;
         this._lastTeleportTime = 0;
 
         if (hero instanceof Io) {
@@ -5531,7 +5531,11 @@ class BotAI {
             'sword': 1500,
             'vladmir': 1500,
             'linkens': 1500,
-            'butterfly': 2500
+            'butterfly': 2500,
+            'bracer' : 200,
+            'wraithband': 200,
+            'nulltalisman': 200,
+            'dragonlance': 1500
         };
         return costs[itemId] || 0;
     }
@@ -5546,7 +5550,12 @@ class BotAI {
             'sword': new Item('sword', 'Crystalys', 1500, { damageBonus: 32, critChance: 0.3, critMultiplier: 1.6 }),
             'vladmir': new Item('vladmir', "Vladmir's Offering", 1500, { manaRegen: 0.75, armorBonus: 1 }),
             'linkens': new Item('linkens', "Linken's Sphere", 1500, { hp: 200, mana: 200, damage: 15, manaRegen: 5 }),
-            'butterfly': new Item('butterfly', 'Butterfly', 2500, { agility: 35, evasion: 0.35, damage: 25 })
+            'butterfly': new Item('butterfly', 'Butterfly', 2500, { agility: 35, evasion: 0.35, damage: 25 }),
+            'bracer': new Item('bracer', 'Bracer', 200, { hp: 150, damage: 6, hpRegen: 0.75 }),
+            'wraithband': new Item('wraithband', 'Wraith Band', 200, { agility: 6, damage: 6 }),
+            'nulltalisman': new Item('nulltalisman', 'Null Talisman', 200, { intelligence: 6, manaRegen: 0.5 , damage: 6 }),
+            'dragonlance': new Item('dragonlance', 'Dragon Lance', 1500, { damage: 20, attackRange: 70 }),
+            'falconblade': new Item('falconblade', 'Falcon Blade', 475, { hp:200, damage: 14, manaRegen: 1.8 })
         };
         return items[itemId] || null;
     }
@@ -6200,94 +6209,123 @@ class Game {
 
         const items = [
             {
+                id: 'bracer',
+                title: 'Bracer',
+                price: 200,
+                stats: ['+6 Damage', '+3 Strength'],
+                icon: 'images/bracer.webp',
+                desc: 'Simple early game item.'
+            },
+            {
+                id: 'wraithband',
+                title: 'Wraith Band',
+                price: 200,
+                stats: ['+6 Damage', '+3 Agility'],
+                icon: 'images/wraith_band.webp',
+                desc: 'Simple early game item.'
+            },
+            {
+                id: 'nulltalisman',
+                title: 'Null Talisman',
+                price: 200,
+                stats: ['+6 Damage', '+3 Intelligence'],
+                icon: 'images/null_talisman.webp',
+                desc: 'Simple early game item.'
+            },
+            {
+                id: 'falconblade',
+                title: 'Falcon Blade',
+                price: 475,
+                icon: 'images/falcon_blade.webp',
+                stats: ['+14 Damage', '+200 Health', '+1.8 Mana regen'],
+            },
+            {
                 id: 'boots',
-                title: '👢 Boots of Speed',
+                title: 'Boots of Speed',
                 price: 500,
                 stats: ['+30 Movement Speed'],
                 icon: 'images/Boots_of_speed_icon.webp',
-                emoji: '👢',
                 desc: 'Basic movement boots.'
             },
             {
                 id: 'sword',
-                title: '⚔️ Crystalys',
+                title: 'Crystalys',
                 price: 1500,
                 stats: ['+32 Damage', '+30% Crit Chance', '+60% Crit Multiplier'],
                 icon: 'images/Crystalys_icon.webp',
-                emoji: '⚔️',
                 desc: 'High burst damage.'
             },
             {
                 id: 'vitality',
-                title: '💚 Vitality Booster',
+                title: 'Vitality Booster',
                 price: 1000,
                 stats: ['+250 Health'],
                 icon: 'images/Vitality_booster_icon.webp',
-                emoji: '💚',
                 desc: 'Simple survivability item.'
             },
             {
                 id: 'ringhealth',
-                title: '💍 Ring of Health',
+                title: 'Ring of Health',
                 price: 400,
                 stats: ['+4.5 HP Regen'],
-                icon: '',
-                emoji: '💍',
+                icon: 'images/ring_of_health.webp',
                 desc: 'Great sustain.'
             },
             {
                 id: 'vladmir',
-                title: '🛡️ Vladmir\'s Offering',
+                title: 'Vladmir\'s Offering',
                 price: 1500,
                 stats: ['+0.75 Mana Regen', '+1 Armor'],
-                icon: 'images/vladimirs_offering.png',
-                emoji: '🛡️',
+                icon: 'images/vladmirs_offering.webp',
                 desc: 'Team sustain and armor.'
             },
             {
                 id: 'linkens',
-                title: '🛡️ Linken\'s Sphere',
+                title: 'Linken\'s Sphere',
                 price: 1500,
                 stats: ['+200 Health', '+200 Mana', '+15 Damage', '+5 Mana Regen'],
                 icon: 'images/sphere.png',
-                emoji: '🛡️',
                 desc: 'Defensive spell block.'
             },
             {
                 id: 'butterfly',
-                title: '🦋 Butterfly',
+                title: 'Butterfly',
                 price: 2500,
                 stats: ['+35 Agility', '+35% Evasion', '+25 Damage'],
-                icon: '',
-                emoji: '🦋',
+                icon: 'images/butterfly.webp',
                 desc: 'Deadly agility carry item.'
             },
             {
                 id: 'ringtarrasque',
-                title: '💍 Ring of Tarrasque',
+                title: 'Ring of Tarrasque',
                 price: 1700,
                 stats: ['+12 HP Regen'],
-                icon: '',
-                emoji: '💍',
+                icon: 'images/ring_of_tarrasque.webp',
                 desc: 'Tanky sustain item.'
             },
             {
                 id: 'reaver',
-                title: '⚔️ Reaver',
+                title: 'Reaver',
                 price: 2500,
                 stats: ['+25 Health'],
-                icon: '',
-                emoji: '⚔️',
+                icon: 'images/reaver.webp',
                 desc: 'Reliable health scaling.'
             },
             {
                 id: 'radiance',
-                title: '🔥 Radiance',
+                title: 'Radiance',
                 price: 1500,
                 stats: ['+20 Damage', 'Burns nearby enemies'],
-                icon: '',
-                emoji: '🔥',
+                icon: 'images/radiance.webp',
                 desc: 'Strong teamfight damage item.'
+            },
+            {
+                id: 'dragonlance',
+                title: 'Dragon Lance',
+                price: 1500,
+                stats: ['+20 Damage', '+70 Attack Range'],
+                icon: '',
+                desc: 'На ренджей брать!!!'
             }
         ];
 
@@ -6746,6 +6784,11 @@ class Game {
         if (type === 'reaver') it = new Item('reaver', 'Reaver', 2500, { hp: 25 });
         if (type === 'radiance') it = new Item('radiance', 'Radiance', 1500, { damageBonus: 20 });
         if (type === 'butterfly') it = new Item('butterfly', 'Butterfly', 2500, { agility: 35, evasion: 0.35, damage: 25 });
+        if (type === 'bracer') it = new Item('bracer', 'Bracer', 200, { hp: 100, damage: 6, hpRegen: 0.75 });
+        if (type === 'wraithband') it = new Item('wraithband', 'Wraith Band', 200, { agility: 6, damage: 6 });
+        if (type === 'nulltalisman') it = new Item('nulltalisman', 'Null Talisman', 200, { intelligence: 6, manaRegen: 0.5, damage: 6 });
+        if (type === 'dragonlance') it = new Item('dragonlance', 'Dragon Lance', 1500, { rangeBonus: 70, damage: 20 });
+        if (type === 'falconblade') it = new Item('falconblade', 'Falcon Blade', 475, { damage: 14, hp: 200, manaRegen: 1.8 });
         if (it && p.gold >= it.cost && p.inventory.addItem(it)) {
             p.gold -= it.cost; audio.play('buy');
             if (it.id === 'vladmir') { p.hasVladmir = true; }
