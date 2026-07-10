@@ -1113,6 +1113,8 @@ class AdaptiveStrikeProjectile {
 class Warlock extends Hero {
     constructor(x, y, team) {
         super(x, y, team, 'Warlock'); this.attackRange = 370;
+        this.maxMp = 450;
+        this.mp = 450;
         this.abilities.push(new Ability('Fatal Bonds', 'active', 20, 120, 'Links visible enemies for 18 seconds. 15% of damage taken is shared between linked targets.'));
         this.abilities.push(new Ability('Shadow Word', 'active', 15, 100, 'Heals allies or damages enemies in an area around the target every second.'));
         this.abilities.push(new Ability('Upheaval', 'active', 30, 100, 'Toggled ability. Slows enemies in a 575 radius and deals 10 damage per second for up to 10 seconds.'));
@@ -1383,7 +1385,9 @@ class Sniper extends Hero {
     constructor(x, y, team) {
         super(x, y, team, 'Sniper'); 
         this.baseRange = 340; 
-        this.attackRange = this.baseRange + 140; 
+        this.attackRange = this.baseRange + 140;
+        this.maxMp = 400;
+        this.mp = 400;
         
         this.abilities.push(new Ability('Shrapnel', 'active', 0, 50, 'Creates an area of explosive shrapnel. Deals 35 damage per second and slows enemies by 25%. Up to 2 charges.'));
         this.abilities.push(new Ability('Headshot', 'passive', 0, 0, 'Passive. 30% chance to deal +20 damage, knock back the enemy, and slow their movement and attack for 1.5 sec.'));
@@ -1492,6 +1496,8 @@ class Bristleback extends Hero {
         this.damage = 64;
         this.baseSpeed = 260; this.speed = 260;
         this.attackRange = 120;
+        this.maxMp = 300;
+        this.mp = 300;
 
         this.abilities.push(new Ability('Viscous Nasal Goo', 'active', 2, 20, 'Fires goo at a target, slowing movement and reducing armor for 5 sec. Effects stack and refresh on each cast.'));
         this.abilities.push(new Ability('Quill Spray', 'active', 3, 25, 'Fires quills in a radius, damaging enemies. Additional damage scales with recent Quill hits.'));
