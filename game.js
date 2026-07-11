@@ -644,7 +644,10 @@ class Hero extends Entity {
         this.maxMp = 0;
         this.mp = 0;
 
+        // ========== ТЕЛЕПОРТ ==========
         this.teleportCharges = 1;
+        this.teleportCooldown = 0;
+        this.teleportMaxCooldown = 60; // 60 секунд на восстановление заряда
         this.isChannelingTeleport = false;
         this.teleportTimer = 0;
         this.teleportTarget = null;
@@ -659,11 +662,12 @@ class Hero extends Entity {
         this.attackRange = 100;
         this.attackSpeed = 1.2;
 
-        // ★★★ ДОБАВЛЯЕМ ТАЙМЕР РЕСПАВНА ★★★
+        // Респавн
         this.respawnTimer = 0;
-        this.respawnCooldown = 10; // 10 секунд
+        this.respawnCooldown = 10;
     }
 
+    // ---------- XP и уровень ----------
     addXp(amount) {
         this.xp += amount;
         while (this.xp >= this.maxXp) {
@@ -678,24 +682,33 @@ class Hero extends Entity {
     }
 
     getHpRegen() {
-    let base = this.hpRegenBase + (this.inventoryHpRegen || 0);
-    // Бонус от Heart of Tarrasque (1.5% от недостающего здоровья)
-    if (this.inventory && this.inventory.items) {
-        const heart = this.inventory.items.find(item => item.id === 'heart');
-        if (heart) {
-            const missing = this.maxHp - this.hp;
-            base += missing * 0.015; // 1.5%
+        let base = this.hpRegenBase + (this.inventoryHpRegen || 0);
+        // Heart of Tarrasque: 1.5% от недостающего здоровья
+        if (this.inventory && this.inventory.items) {
+            const heart = this.inventory.items.find(item => item.id === 'heart');
+            if (heart) {
+                const missing = this.maxHp - this.hp;
+                base += missing * 0.015;
+            }
         }
+        return base;
     }
-    return base;
-}
+
     getMpRegen() {
         return this.mpRegenBase + (this.inventoryManaRegen || 0);
     }
 
+    // ---------- ТЕЛЕПОРТ ----------
     startTeleport(target) {
-        if (this.isDead || this.teleportCharges <= 0 || this.isChannelingTeleport) return false;
+        if (this.isDead || this.isChannelingTeleport) return false;
+        if (this.teleportCharges <= 0) {
+            if (game && game.uiManager) {
+                game.uiManager.addFloatingText(this.x, this.y - 30, '❌ No TP charges', '#ff6666');
+            }
+            return false;
+        }
         if (!target || target.isDead || target.team !== this.team) return false;
+
         this.isChannelingTeleport = true;
         this.teleportTimer = 3.0;
         this.teleportTarget = target;
@@ -713,6 +726,9 @@ class Hero extends Entity {
         this.isChannelingTeleport = false;
         this.teleportTimer = 0;
         this.teleportTarget = null;
+        if (game && game.uiManager && reason) {
+            game.uiManager.addFloatingText(this.x, this.y - 30, '❌ Teleport cancelled', '#ff6666');
+        }
     }
 
     updateTeleport(dt) {
@@ -748,6 +764,7 @@ class Hero extends Entity {
         }
     }
 
+    // ---------- АТАКА ----------
     performAttack() {
         if (!this.attackTarget || this.attackTarget.isDead) return;
         if (this.attackCooldown > 0) return;
@@ -777,25 +794,61 @@ class Hero extends Entity {
         // переопределяется в наследниках
     }
 
-    // ★★★ ПЕРЕОПРЕДЕЛЯЕМ onDeath, ЧТОБЫ ЗАПУСКАТЬ ТАЙМЕР ★★★
+    // ---------- СМЕРТЬ И РЕСПАВН ----------
+    // ---------- СМЕРТЬ И РЕСПАВН ----------
     onDeath(attacker) {
+        // Аегис спасает от смерти мгновенно и на месте — без золота атакующему
+        if (this.hasAegis) {
+            this.hasAegis = false;
+            this.isDead = false;
+            this.hp = this.maxHp;
+            this.mp = this.maxMp;
+            this.respawnTimer = 0;
+            if (game && game.uiManager) {
+                game.uiManager.addFloatingText(this.x, this.y - 40, '🛡️ Aegis revived!', '#ffd700');
+            }
+            return;
+        }
+
         this.respawnTimer = this.respawnCooldown;
-        // Можно добавить эффект смерти
         if (game && game.uiManager) {
             game.uiManager.addFloatingText(this.x, this.y - 30, '💀 Respawn in ' + Math.ceil(this.respawnTimer) + 's', '#ff4444');
         }
+
+        // ★★★ ЗОЛОТО ЗА УБИЙСТВО ★★★
+        if (attacker instanceof Hero) {
+            attacker.gold += 200;
+            if (attacker === game.playerHero) {
+                game.uiManager.addFloatingText(this.x, this.y - 15, '+200 🪙', '#ffd700');
+            }
+        }
     }
 
-    // ★★★ ИСПРАВЛЕННЫЙ update С ПОДДЕРЖКОЙ РЕСПАВНА ★★★
+    // ---------- ОСНОВНОЙ update (с восстановлением зарядов ТП) ----------
     update(dt) {
-        // Если мёртв – обновляем таймер и выходим
+        // Восстановление заряда телепорта
+        if (this.teleportCooldown > 0) {
+            this.teleportCooldown -= dt;
+            if (this.teleportCooldown <= 0) {
+                this.teleportCooldown = 0;
+                if (this.teleportCharges < 3) {
+                    this.teleportCharges++;
+                    this.teleportCooldown = this.teleportMaxCooldown;
+                }
+            }
+        } else if (this.teleportCharges < 3) {
+            // Если зарядов меньше 3, запускаем кулдаун
+            this.teleportCooldown = this.teleportMaxCooldown;
+        }
+
+        // ---- Если герой мёртв - обновляем таймер и выходим ----
         if (this.isDead) {
             this.respawnTimer -= dt;
             if (this.respawnTimer <= 0) {
-                // Респавн
                 this.isDead = false;
                 this.hp = this.maxHp;
                 this.mp = this.maxMp;
+                this.teleportCharges = Math.min(3, this.teleportCharges + 1);
                 const fountain = game.fountains.find(f => f.team === this.team);
                 if (fountain) {
                     this.x = fountain.x;
@@ -813,7 +866,7 @@ class Hero extends Entity {
             return;
         }
 
-        // Живой – обычная логика
+        // ---- Живой - обычная логика ----
         this.updateTeleport(dt);
         for (let ab of this.abilities) ab.update(dt);
 
@@ -846,76 +899,77 @@ class Hero extends Entity {
         this.updateMovement(dt);
     }
 
+    // ---------- ОТРИСОВКА ----------
     draw(ctx, camera) {
-    if (this.isDead) {
-        // Рисуем таймер респавна над телом
+        if (this.isDead) {
+            const sx = this.x - camera.x;
+            const sy = this.y - camera.y;
+            ctx.save();
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            ctx.fillRect(sx - 30, sy - 30, 60, 30);
+            ctx.fillStyle = '#ff4444';
+            ctx.font = 'bold 14px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const timer = Math.ceil(this.respawnTimer);
+            ctx.fillText(timer > 0 ? timer + 's' : '💀', sx, sy - 5);
+            ctx.restore();
+            return;
+        }
+
+        this.drawShadow(ctx, camera);
         const sx = this.x - camera.x;
         const sy = this.y - camera.y;
+
+        // Круг героя
         ctx.save();
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.fillRect(sx - 30, sy - 30, 60, 30);
-        ctx.fillStyle = '#ff4444';
-        ctx.font = 'bold 14px Arial';
+        ctx.fillStyle = this.team === 'radiant' ? '#4a9eff' : '#ff4a4a';
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(sx, sy, this.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+
+        // Сокращённое имя
+        const shortNames = {
+            'Morphling': 'MORPH',
+            'Warlock': 'WAR',
+            'Sniper': 'SNIP',
+            'Bristleback': 'BRIST',
+            'Huskar': 'HUSK',
+            'Anti-Mage': 'ANTI',
+            'Broodmother': 'BROOD',
+            'Io': 'IO',
+            'Tinker': 'TINK'
+        };
+        let displayName = shortNames[this.name] || this.name.substring(0, 4).toUpperCase();
+
+        ctx.save();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 11px Arial';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        const timer = Math.ceil(this.respawnTimer);
-        ctx.fillText(timer > 0 ? timer + 's' : '💀', sx, sy - 5);
+        ctx.fillText(displayName, sx, sy);
         ctx.restore();
-        return;
+
+        this.drawHealthBar(ctx, camera);
+
+        if (this.stunned) {
+            ctx.save();
+            ctx.fillStyle = 'rgba(255, 255, 0, 0.3)';
+            ctx.beginPath();
+            ctx.arc(sx, sy, this.radius + 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
     }
 
-    this.drawShadow(ctx, camera);
-    const sx = this.x - camera.x;
-    const sy = this.y - camera.y;
-
-    // Круг героя
-    ctx.save();
-    ctx.fillStyle = this.team === 'radiant' ? '#4a9eff' : '#ff4a4a';
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(sx, sy, this.radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
-
-    // ★★★ СОКРАЩЁННОЕ ИМЯ (БЕЗ УРОВНЯ) В КРУЖКЕ ★★★
-    const shortNames = {
-        'Morphling': 'MORPH',
-        'Warlock': 'WAR',
-        'Sniper': 'SNIP',
-        'Bristleback': 'BRIST',
-        'Huskar': 'HUSK',
-        'Anti-Mage': 'ANTI',
-        'Broodmother': 'BROOD',
-        'Io': 'IO',
-        'Tinker': 'TINK'
-    };
-    let displayName = shortNames[this.name] || this.name.substring(0, 4).toUpperCase();
-
-    ctx.save();
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 11px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(displayName, sx, sy);
-    ctx.restore();
-
-    // Полоска здоровья
-    this.drawHealthBar(ctx, camera);
-
-    // Эффект стана
-    if (this.stunned) {
-        ctx.save();
-        ctx.fillStyle = 'rgba(255, 255, 0, 0.3)';
-        ctx.beginPath();
-        ctx.arc(sx, sy, this.radius + 4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-    }
+    isAttackable() {
+        return !this.isDead && !this.invulnerable;
     }
 }
-
 // =========================================================================
 //  ГЕРОИ (наследники) – полные определения
 // =========================================================================
@@ -3736,6 +3790,7 @@ class Roshan extends Entity {
         this.spellBlockCooldown = 0;
         this.spellBlockCooldownMax = 20;
         this.respawnTimer = 10;
+        this.hpRegen = 20; // пассивный хилл, HP в секунду
     }
 
     blockSpell(caster) {
@@ -3798,6 +3853,11 @@ class Roshan extends Entity {
             return;
         }
 
+        // Пассивная регенерация — 20 HP/сек, без мгновенных скачков
+        if (this.hp < this.maxHp) {
+            this.hp = Math.min(this.maxHp, this.hp + this.hpRegen * dt);
+        }
+
         this.lairChangeTimer += dt;
         if (this.lairChangeTimer >= this.lairChangeInterval && this.state === 'idle') {
             this.lairChangeTimer = 0;
@@ -3816,7 +3876,6 @@ class Roshan extends Entity {
                 this.y = this.homeY;
                 this.state = 'idle';
                 this.target = null;
-                this.hp = this.maxHp;
             } else {
                 const step = this.speed * dt;
                 this.x += (dx / dist) * step;
@@ -3843,7 +3902,6 @@ class Roshan extends Entity {
                 this.moveTarget = null;
                 this.state = 'idle';
                 this.target = null;
-                this.hp = this.maxHp;
                 if (this.game && this.game.roshanLairs) {
                     const current = this.game.roshanLairs.find(l => Math.hypot(l.x - this.x, l.y - this.y) < 50);
                     if (current) this.currentLair = current;
@@ -4621,8 +4679,9 @@ class Projectile {
                     game.uiManager.addFloatingText(this.target.x, this.target.y - 30, 'MISS', '#ff6666');
                     return true;
                 }
-                if (this.target.missChance > 0 && Math.random() < this.target.missChance) {
-                    game.uiManager.addFloatingText(this.target.x, this.target.y - 30, 'MISS (Blind)', '#ff6666');
+                // Промахивается АТАКУЮЩИЙ (если он ослеплён), а не цель
+                if (this.attacker && this.attacker.missChance > 0 && Math.random() < this.attacker.missChance) {
+                    game.uiManager.addFloatingText(this.attacker.x, this.attacker.y - 30, 'MISS (Blind)', '#ff6666');
                     return true;
                 }
             }
@@ -4644,7 +4703,7 @@ class Projectile {
                 this.target.slowTimer = 1.5;
                 this.target.headshotSlowTimer = 1.5;
                 this.target.hitEffectTimer = 0.2;
-                
+
                 if (!(this.target instanceof Tower) && !(this.target instanceof Ancient)) {
                     let dx = this.target.x - this.attacker.x;
                     let dy = this.target.y - this.attacker.y;
@@ -4655,7 +4714,7 @@ class Projectile {
                     this.target.x = Math.max(50, Math.min(game.map.width - 50, this.target.x));
                     this.target.y = Math.max(50, Math.min(game.map.height - 50, this.target.y));
                 }
-                
+
                 game.uiManager.addFloatingText(this.target.x, this.target.y - 30, "HEADSHOT", '#ffa500');
             }
             if (this.isCrit) {
@@ -4670,7 +4729,7 @@ class Projectile {
                 finalDamage += this.target._incapacitatingBite.bonusDamageTaken;
             }
             this.target.takeDamage(finalDamage, this.attacker);
-            
+
             if (this.isBroodmotherAttack && this.attacker instanceof Broodmother && this.attacker.hungerActive) {
                 const heal = this.damage * 0.4;
                 this.attacker.hp = Math.min(this.attacker.maxHp, this.attacker.hp + heal);
@@ -5261,6 +5320,86 @@ class BotAI {
         }
     }
 
+    // ---------- НОВОЕ: сбор всей командой на Рошана и совместный пуш линии ----------
+    updateRoshanSquad(dt) {
+        const hero = this.hero;
+        const game = this.game;
+        if (!game.roshan) return;
+
+        if (!game.roshanSquadState) game.roshanSquadState = {};
+        if (!game.roshanSquadState[hero.team]) {
+            game.roshanSquadState[hero.team] = { phase: 'idle', pushLane: null, lootTimer: 0 };
+        }
+        const squad = game.roshanSquadState[hero.team];
+
+        // На 5-й минуте матча один раз решаем — идти на Рошана всей толпой
+        if (squad.phase === 'idle') {
+            if (game.matchTime >= 300) { //00000000000000000000000000000000000000000000000000000000
+                squad.phase = game.roshan.isDead ? 'done' : 'grouping';
+            }
+            return;
+        }
+
+        if (squad.phase === 'done') return;
+
+        // ---- Сбор к Рошану и фокус-атака ----
+        if (squad.phase === 'grouping' || squad.phase === 'fighting') {
+            if (game.roshan.isDead) {
+                squad.phase = 'looting';
+                squad.lootTimer = 1.5;
+                this.state = 'roshan_group';
+                hero.attackTarget = null;
+                return;
+            }
+
+            const dist = Math.hypot(hero.x - game.roshan.x, hero.y - game.roshan.y);
+            this.state = 'roshan_group';
+            if (dist > hero.attackRange * 0.85) {
+                hero.attackTarget = null;
+                hero.moveTo(game.roshan.x, game.roshan.y);
+            } else {
+                squad.phase = 'fighting';
+                hero.attackTarget = game.roshan;
+                this.abilityTimer += dt;
+                if (this.abilityTimer > 2.0) {
+                    this.abilityTimer = 0;
+                    this.useAbilities(game.roshan);
+                }
+            }
+            return;
+        }
+
+        // ---- Ждём немного, пока щит (Аегис) подбирается штатным кодом в Game.update ----
+        if (squad.phase === 'looting') {
+            this.state = 'roshan_group';
+            hero.attackTarget = null;
+            squad.lootTimer -= dt;
+            if (squad.lootTimer <= 0) {
+                if (!squad.pushLane) {
+                    const lanes = ['top', 'mid', 'bottom'];
+                    squad.pushLane = lanes[Math.floor(Math.random() * lanes.length)];
+                }
+                squad.phase = 'pushing';
+            }
+            return;
+        }
+
+        // ---- Каждый бот САМ переключается на общую линию, независимо от остальных ----
+        if (squad.phase === 'pushing') {
+            if (!this._roshanPushApplied) {
+                this._roshanPushApplied = true;
+                this.lane = squad.pushLane;
+                this.waypoints = hero.team === 'radiant' ? game.map.waypoints[this.lane] : game.map.waypointsReverse[this.lane];
+                this.waypointIndex = 0;
+                this.state = 'normal';
+                if (this.waypoints && this.waypoints.length > 0) {
+                    hero.moveTo(this.waypoints[0].x, this.waypoints[0].y);
+                }
+            }
+            return;
+        }
+    }
+
     update(dt) {
         const hero = this.hero;
         if (hero.isDead) return;
@@ -5281,7 +5420,10 @@ class BotAI {
             this.tryBuyItem();
         }
 
-        if (this.shouldUseTeleport()) {
+        // Групповой поход на Рошана / совместный пуш линии (см. метод выше)
+        this.updateRoshanSquad(dt);
+
+        if (this.state !== 'roshan_group' && this.shouldUseTeleport()) {
             this.useTeleport();
         }
 
@@ -5565,7 +5707,7 @@ class BotAI {
         const enemies = hero.team === 'radiant' ? this.game.direEntities() : this.game.radiantEntities();
         const neutrals = this.game.creeps.filter(c => c.team === 'neutral' && !c.isDead && c.isAttackable());
         enemies.push(...neutrals);
-        
+
         const attackRange = hero.attackRange * 1.2;
 
         let closestHero = null;
@@ -6178,7 +6320,6 @@ class Game {
         document.getElementById('hero-selection').classList.add('hidden');
         document.getElementById('game-screen').classList.remove('hidden');
 
-        // ★★★ ИСПРАВЛЕНИЕ: включаем события мыши на канвасе ★★★
         canvas.style.pointerEvents = 'auto';
 
         this.lastTime = performance.now();
@@ -6805,6 +6946,7 @@ class Game {
         requestAnimationFrame((t) => this.loop(t));
     }
 
+    // ========== ИСПРАВЛЕННЫЙ МЕТОД update ==========
     update(dt) {
         this.matchTime += dt;
         this.creepTimer += dt;
@@ -6835,65 +6977,43 @@ class Game {
                 this.roshan.updateDead(dt);
             } else {
                 this.roshan.update(dt);
-                if (this.playerHero && !this.playerHero.isDead) {
-                    for (let i = this.aegisItems.length - 1; i >= 0; i--) {
-                        if (this.aegisItems[i].pickUp(this.playerHero)) {
-                            this.aegisItems.splice(i, 1);
-                        }
+            }
+        }
+
+        // Подбор Аегиса работает всегда, независимо от того, жив Рошан или уже убит
+        if (this.aegisItems && this.aegisItems.length > 0) {
+            if (this.playerHero && !this.playerHero.isDead) {
+                for (let i = this.aegisItems.length - 1; i >= 0; i--) {
+                    if (this.aegisItems[i].pickUp(this.playerHero)) {
+                        this.aegisItems.splice(i, 1);
                     }
                 }
-                for (let bot of [...this.alliedBots, ...this.enemyBots]) {
-                    if (bot && !bot.isDead) {
-                        for (let i = this.aegisItems.length - 1; i >= 0; i--) {
-                            if (this.aegisItems[i].pickUp(bot)) {
-                                this.aegisItems.splice(i, 1);
-                            }
+            }
+            for (let bot of [...this.alliedBots, ...this.enemyBots]) {
+                if (bot && !bot.isDead) {
+                    for (let i = this.aegisItems.length - 1; i >= 0; i--) {
+                        if (this.aegisItems[i].pickUp(bot)) {
+                            this.aegisItems.splice(i, 1);
                         }
                     }
                 }
             }
         }
 
+        // Воскрешение по Аегису теперь обрабатывается мгновенно внутри Hero.onDeath(),
+        // поэтому здесь никаких дополнительных проверок isDead+hasAegis не нужно
         this.playerHero.update(dt);
-        if (this.playerHero && this.playerHero.isDead && this.playerHero.hasAegis) {
-            this.playerHero.hasAegis = false;
-            this.playerHero.isDead = false;
-            this.playerHero.hp = this.playerHero.maxHp;
-            this.playerHero.mp = this.playerHero.maxMp;
-            this.uiManager.addFloatingText(this.playerHero.x, this.playerHero.y - 40, '🛡️ Aegis revived!', '#ffd700');
-        }
 
         this.enemyHero.update(dt);
-        if (this.enemyHero && this.enemyHero.isDead && this.enemyHero.hasAegis) {
-            this.enemyHero.hasAegis = false;
-            this.enemyHero.isDead = false;
-            this.enemyHero.hp = this.enemyHero.maxHp;
-            this.enemyHero.mp = this.enemyHero.maxMp;
-            this.uiManager.addFloatingText(this.enemyHero.x, this.enemyHero.y - 40, '🛡️ Aegis revived!', '#ffd700');
-        }
         if (this.enemyHero.ai) this.enemyHero.ai.update(dt);
 
         for (let bot of this.alliedBots) {
             bot.update(dt);
             if (bot.ai) bot.ai.update(dt);
-            if (bot.isDead && bot.hasAegis) {
-                bot.hasAegis = false;
-                bot.isDead = false;
-                bot.hp = bot.maxHp;
-                bot.mp = bot.maxMp;
-                this.uiManager.addFloatingText(bot.x, bot.y - 40, '🛡️ Aegis revived!', '#ffd700');
-            }
         }
         for (let bot of this.enemyBots) {
             bot.update(dt);
             if (bot.ai) bot.ai.update(dt);
-            if (bot.isDead && bot.hasAegis) {
-                bot.hasAegis = false;
-                bot.isDead = false;
-                bot.hp = bot.maxHp;
-                bot.mp = bot.maxMp;
-                this.uiManager.addFloatingText(bot.x, bot.y - 40, '🛡️ Aegis revived!', '#ffd700');
-            }
         }
 
         for (let i = this.creeps.length - 1; i >= 0; i--) {
@@ -6972,7 +7092,7 @@ class Game {
 
         for (let p of this.projectiles) p.draw(ctx, this.camera);
         for (let e of this.effects) {
-            // обработка эффектов
+            // обработка эффектов (оставлена как в вашем коде)
         }
         this.uiManager.draw(ctx, this.camera);
     }
