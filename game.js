@@ -1781,47 +1781,45 @@ class Huskar extends Hero {
     }
 
     update(dt) {
-        if (this.isDead) return;
+    if (this.isDead) {
+        super.update(dt); // ★★★ ВАЖНО: обновляем таймер респавна ★★★
+        return;
+    }
 
-        let hpPct = this.hp / this.maxHp;
-        let ratio = Math.max(0, Math.min(1, (1.0 - hpPct) / 0.9));
-        this.magicResistance = 0.25 * ratio;
-        let bonusAS = 170 * ratio;
-        this.attackSpeed = 1.2 / (1 + (bonusAS / 100));
-        this.hpRegenBase = 2.0 + (this.baseStrength * 0.55 * ratio);
+    let hpPct = this.hp / this.maxHp;
+    let ratio = Math.max(0, Math.min(1, (1.0 - hpPct) / 0.9));
+    this.magicResistance = 0.25 * ratio;
+    let bonusAS = 170 * ratio;
+    this.attackSpeed = 1.2 / (1 + (bonusAS / 100));
+    this.hpRegenBase = 2.0 + (this.baseStrength * 0.55 * ratio);
 
-        if (this.lifeBreakTarget) {
-            if (this.lifeBreakTarget.isDead) {
+    if (this.lifeBreakTarget) {
+        if (this.lifeBreakTarget.isDead) {
+            this.lifeBreakTarget = null;
+        } else {
+            let dx = this.lifeBreakTarget.x - this.x;
+            let dy = this.lifeBreakTarget.y - this.y;
+            let dist = Math.hypot(dx, dy);
+            if (dist < 30) {
+                let dmg = this.lifeBreakTarget.hp * 0.32;
+                this.lifeBreakTarget.takeDamage(dmg, this, false, 'magic');
+                this.lifeBreakTarget.lifeBreakSlowTimer = 3.0;
+                this.lifeBreakTarget.hitEffectTimer = 0.2;
                 this.lifeBreakTarget = null;
+                this.targetX = this.x; this.targetY = this.y;
             } else {
-                let dx = this.lifeBreakTarget.x - this.x;
-                let dy = this.lifeBreakTarget.y - this.y;
-                let dist = Math.hypot(dx, dy);
-                if (dist < 30) {
-                    let dmg = this.lifeBreakTarget.hp * 0.32;
-                    this.lifeBreakTarget.takeDamage(dmg, this, false, 'magic');
-                    this.lifeBreakTarget.lifeBreakSlowTimer = 3.0;
-                    this.lifeBreakTarget.hitEffectTimer = 0.2;
-                    this.lifeBreakTarget = null;
-                    this.targetX = this.x; this.targetY = this.y;
-                } else {
-                    this.x += (dx / dist) * 1200 * dt;
-                    this.y += (dy / dist) * 1200 * dt;
-                    this.targetX = this.x; this.targetY = this.y;
-                }
+                this.x += (dx / dist) * 1200 * dt;
+                this.y += (dy / dist) * 1200 * dt;
+                this.targetX = this.x; this.targetY = this.y;
             }
-            for (let ab of this.abilities) ab.update(dt);
-            return; 
         }
-
-        super.update(dt);
-        this.mp = 0; 
+        for (let ab of this.abilities) ab.update(dt);
+        return;
     }
 
-    performAttack() {
-        if (this.isChannelingTeleport) { this.cancelTeleport('ability'); return; }
-        super.performAttack();
-    }
+    super.update(dt);
+    this.mp = 0;
+}
 }
 
 // ----- Anti-Mage -----
@@ -2195,46 +2193,50 @@ class Broodmother extends Hero {
     }
 
     update(dt) {
-        if (this.isDead) return;
-        this.updateTeleport(dt);
-        this.updateBuffs(dt);
-        if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.getHpRegen() * dt);
-        if (this.maxMp > 0 && this.mp < this.maxMp) this.mp = Math.min(this.maxMp, this.mp + this.getMpRegen() * dt);
+    if (this.isDead) {
+        super.update(dt); // ★★★ ВАЖНО: обновляем таймер респавна ★★★
+        return;
+    }
 
-        this.updateHunger(dt);
-        this.updateIncapacitatingBite(dt);
-        this.updateSpiderDebuffs(dt);
+    this.updateTeleport(dt);
+    this.updateBuffs(dt);
+    if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.getHpRegen() * dt);
+    if (this.maxMp > 0 && this.mp < this.maxMp) this.mp = Math.min(this.maxMp, this.mp + this.getMpRegen() * dt);
 
-        let webBonus = this.getWebSpeedBonus();
-        if (webBonus > 0) {
-            this.speed = this.baseSpeed * (1 + webBonus);
-        } else {
-            this.speed = this.baseSpeed;
-        }
+    this.updateHunger(dt);
+    this.updateIncapacitatingBite(dt);
+    this.updateSpiderDebuffs(dt);
 
-        this.updateMovement(dt);
-        let rate = 1.0;
-        if (this.headshotSlowTimer > 0) rate *= 0.5;
-        if (this.lifeBreakSlowTimer > 0) rate *= 0.4;
-        if (this.attackCooldown > 0) this.attackCooldown -= dt * rate;
+    let webBonus = this.getWebSpeedBonus();
+    if (webBonus > 0) {
+        this.speed = this.baseSpeed * (1 + webBonus);
+    } else {
+        this.speed = this.baseSpeed;
+    }
 
-        if (this.attackTarget && this.attackTarget.isAttackable()) {
-            if (this.attackTarget.isDead) { this.attackTarget = null; return; }
-            let d = Math.hypot(this.attackTarget.x - this.x, this.attackTarget.y - this.y);
-            if (d <= this.attackRange && this.attackCooldown <= 0) { this.performAttack(); }
-        } else {
-            this.attackTarget = null;
-        }
+    this.updateMovement(dt);
+    let rate = 1.0;
+    if (this.headshotSlowTimer > 0) rate *= 0.5;
+    if (this.lifeBreakSlowTimer > 0) rate *= 0.4;
+    if (this.attackCooldown > 0) this.attackCooldown -= dt * rate;
 
-        for (let ab of this.abilities) ab.update(dt);
+    if (this.attackTarget && this.attackTarget.isAttackable()) {
+        if (this.attackTarget.isDead) { this.attackTarget = null; return; }
+        let d = Math.hypot(this.attackTarget.x - this.x, this.attackTarget.y - this.y);
+        if (d <= this.attackRange && this.attackCooldown <= 0) { this.performAttack(); }
+    } else {
+        this.attackTarget = null;
+    }
 
-        for (let i = this.spiderlings.length - 1; i >= 0; i--) {
-            const s = this.spiderlings[i];
-            if (s.isDead || s.lifeTime <= 0) {
-                this.spiderlings.splice(i, 1);
-            }
+    for (let ab of this.abilities) ab.update(dt);
+
+    for (let i = this.spiderlings.length - 1; i >= 0; i--) {
+        const s = this.spiderlings[i];
+        if (s.isDead || s.lifeTime <= 0) {
+            this.spiderlings.splice(i, 1);
         }
     }
+}
 
     useAbility(idx) {
         if (this.isDead || this.silenceTimer > 0) return;
@@ -3022,33 +3024,37 @@ class Io extends Hero {
     }
 
     update(dt) {
-        if (this.isDead) return;
-        this.updateTeleport(dt);
-        this.updateBuffs(dt);
-        if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.getHpRegen() * dt);
-        if (this.maxMp > 0 && this.mp < this.maxMp) this.mp = Math.min(this.maxMp, this.mp + this.getMpRegen() * dt);
-
-        this.updateTether(dt);
-        this.updateSpirits(dt);
-        this.updateOvercharge(dt);
-        this.updateRelocate(dt);
-
-        this.updateMovement(dt);
-        let rate = 1.0;
-        if (this.headshotSlowTimer > 0) rate *= 0.5;
-        if (this.lifeBreakSlowTimer > 0) rate *= 0.4;
-        if (this.attackCooldown > 0) this.attackCooldown -= dt * rate;
-
-        if (this.attackTarget && this.attackTarget.isAttackable()) {
-            if (this.attackTarget.isDead) { this.attackTarget = null; return; }
-            let d = Math.hypot(this.attackTarget.x - this.x, this.attackTarget.y - this.y);
-            if (d <= this.attackRange && this.attackCooldown <= 0) { this.performAttack(); }
-        } else {
-            this.attackTarget = null;
-        }
-
-        for (let ab of this.abilities) ab.update(dt);
+    if (this.isDead) {
+        super.update(dt); // ★★★ ВАЖНО: обновляем таймер респавна ★★★
+        return;
     }
+
+    this.updateTeleport(dt);
+    this.updateBuffs(dt);
+    if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + this.getHpRegen() * dt);
+    if (this.maxMp > 0 && this.mp < this.maxMp) this.mp = Math.min(this.maxMp, this.mp + this.getMpRegen() * dt);
+
+    this.updateTether(dt);
+    this.updateSpirits(dt);
+    this.updateOvercharge(dt);
+    this.updateRelocate(dt);
+
+    this.updateMovement(dt);
+    let rate = 1.0;
+    if (this.headshotSlowTimer > 0) rate *= 0.5;
+    if (this.lifeBreakSlowTimer > 0) rate *= 0.4;
+    if (this.attackCooldown > 0) this.attackCooldown -= dt * rate;
+
+    if (this.attackTarget && this.attackTarget.isAttackable()) {
+        if (this.attackTarget.isDead) { this.attackTarget = null; return; }
+        let d = Math.hypot(this.attackTarget.x - this.x, this.attackTarget.y - this.y);
+        if (d <= this.attackRange && this.attackCooldown <= 0) { this.performAttack(); }
+    } else {
+        this.attackTarget = null;
+    }
+
+    for (let ab of this.abilities) ab.update(dt);
+}
 
     performAttack() {
         if (this.isChannelingTeleport) {
@@ -3617,42 +3623,46 @@ class Tinker extends Hero {
     }
 
     update(dt) {
-        if (this.isDead) return;
-        this.updateTeleport(dt);
-        this.updateKeen(dt);
-
-        if (this.missChanceTimer > 0) {
-            this.missChanceTimer -= dt;
-            if (this.missChanceTimer <= 0) {
-                this.missChance = 0;
-                this.missChanceTimer = 0;
-            }
-        }
-
-        if (this._laserBeamLife > 0) {
-            this._laserBeamLife -= dt;
-            if (this._laserBeamLife <= 0) this._laserBeamTarget = null;
-        }
-
-        this.updateMarch(dt);
-        this.updateTurrets(dt);
-
-        if (this.isRearming) {
-            const distMoved = Math.hypot(this.x - this._rearmStartX, this.y - this._rearmStartY);
-            if (distMoved > 5) {
-                this.cancelRearm('move');
-            } else if (this.isDead) {
-                this.cancelRearm('death');
-            } else {
-                this.rearmTimer -= dt;
-                if (this.rearmTimer <= 0) {
-                    this.finishRearm();
-                }
-            }
-        }
-
-        super.update(dt);
+    if (this.isDead) {
+        super.update(dt); // ★★★ ВАЖНО: обновляем таймер респавна ★★★
+        return;
     }
+
+    this.updateTeleport(dt);
+    this.updateKeen(dt);
+
+    if (this.missChanceTimer > 0) {
+        this.missChanceTimer -= dt;
+        if (this.missChanceTimer <= 0) {
+            this.missChance = 0;
+            this.missChanceTimer = 0;
+        }
+    }
+
+    if (this._laserBeamLife > 0) {
+        this._laserBeamLife -= dt;
+        if (this._laserBeamLife <= 0) this._laserBeamTarget = null;
+    }
+
+    this.updateMarch(dt);
+    this.updateTurrets(dt);
+
+    if (this.isRearming) {
+        const distMoved = Math.hypot(this.x - this._rearmStartX, this.y - this._rearmStartY);
+        if (distMoved > 5) {
+            this.cancelRearm('move');
+        } else if (this.isDead) {
+            this.cancelRearm('death');
+        } else {
+            this.rearmTimer -= dt;
+            if (this.rearmTimer <= 0) {
+                this.finishRearm();
+            }
+        }
+    }
+
+    super.update(dt);
+}
 
     performAttack() {
         if (this.isChannelingTeleport) {
@@ -5334,7 +5344,7 @@ class BotAI {
 
         // На 5-й минуте матча один раз решаем — идти на Рошана всей толпой
         if (squad.phase === 'idle') {
-            if (game.matchTime >= 300) { //00000000000000000000000000000000000000000000000000000000
+            if (game.matchTime >= 1) { //00000000000000000000000000000000000000000000000000000000
                 squad.phase = game.roshan.isDead ? 'done' : 'grouping';
             }
             return;
